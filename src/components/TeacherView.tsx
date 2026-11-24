@@ -6,6 +6,7 @@ import {
   deleteDoc,
   doc,
   getDoc,
+  getDocFromServer,
   onSnapshot,
   query,
   serverTimestamp,
@@ -277,7 +278,7 @@ export function TeacherView({ user, roomId, onLeave }: TeacherViewProps) {
     [mutes]
   );
 
-  // Active confused student count (within 45s, matching current resetEpoch, not muted)
+  // Active confused student count (within 45s + minor clock skew tolerance, matching current resetEpoch, not muted)
   const confusedCount = useMemo(() => {
     if (!room) return 0;
     return signals.filter(
@@ -285,7 +286,7 @@ export function TeacherView({ user, roomId, onLeave }: TeacherViewProps) {
         s.status === 'confused' &&
         s.epoch === room.resetEpoch &&
         s.expiresAtMs > nowMs &&
-        s.expiresAtMs - nowMs <= CONFUSION_DURATION_MS + 10_000 &&
+        s.expiresAtMs - nowMs <= CONFUSION_DURATION_MS + 180_000 &&
         !mutedTerminalIds.has(s.terminalId)
     ).length;
   }, [mutedTerminalIds, nowMs, room, signals]);
@@ -309,8 +310,12 @@ export function TeacherView({ user, roomId, onLeave }: TeacherViewProps) {
     setIsResetting(true);
     const roomPath = `rooms/${roomId}`;
     try {
+      const serverSnap = await getDocFromServer(doc(db, 'rooms', roomId));
+      const currentEpoch = serverSnap.exists()
+        ? Number(serverSnap.data().resetEpoch ?? room.resetEpoch)
+        : room.resetEpoch;
       await updateDoc(doc(db, 'rooms', roomId), {
-        resetEpoch: room.resetEpoch + 1,
+        resetEpoch: currentEpoch + 1,
         updatedAt: serverTimestamp(),
       });
     } catch (error) {
