@@ -132,13 +132,13 @@ export function EntryScreen({
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-6">
             <div className="space-y-2 max-w-xl">
               <p className="text-xs font-medium text-blue-600 tracking-wide">
-                リアルタイム授業コンパニオン · 最前面小窓モード対応
+                リアルタイム授業コンパニオン · デジタル板書 ＆ AI講義記録・個別演習
               </p>
               <h1 className="text-2xl sm:text-3xl font-bold tracking-tight text-slate-900 text-balance">
-                授業中の「わからない」を、その場で先生へ届ける。
+                授業中の「わからない」を、復習と個別最適演習までつなげる。
               </h1>
               <p className="text-sm text-slate-600 leading-relaxed">
-                同じ授業ルームIDに入るだけで、リアルタイムに理解度と匿名質問を同期します。スライドやコーディング画面の上に重ねられる小窓表示に対応しています。
+                デジタル板書・教科書・ワークシートのページを自動連動。授業録音から講義記録を生成し、生徒ごとのつまずきに合わせた演習問題までワンストップで支援します。
               </p>
             </div>
             <div className="shrink-0 self-start sm:self-center">

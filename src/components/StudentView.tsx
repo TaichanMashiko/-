@@ -12,18 +12,35 @@ import {
   updateDoc,
 } from 'firebase/firestore';
 import {
+  BookOpen,
+  Brain,
   CheckCircle2,
   Clock,
+  FileText,
   HelpCircle,
   LogOut,
   PauseCircle,
   PictureInPicture2,
+  Radio,
   Send,
   X,
 } from 'lucide-react';
 import { db, handleFirestoreError, OperationType } from '../firebase';
 import { useDocumentPiP } from '../hooks/useDocumentPiP';
-import type { MascotMood, RoomData } from '../types';
+import {
+  persistStudentLog,
+  subscribeLectureSessions,
+  subscribeNoteComments,
+  subscribeStudentLogs,
+} from '../services/lectureStore';
+import { getDeckById, getSlideMeta } from '../services/materialsService';
+import type {
+  LectureSession,
+  MascotMood,
+  NoteComment,
+  RoomData,
+  StudentLearningLog,
+} from '../types';
 import {
   CONFUSION_DURATION_MS,
   COOLDOWN_MS,
@@ -32,6 +49,7 @@ import {
   setStoredLastSentAt,
 } from '../utils/identity';
 import { Mascot } from './Mascot';
+import { StudentStudyHub } from './StudentStudyHub';
 
 interface StudentViewProps {
   user: User;
@@ -40,6 +58,8 @@ interface StudentViewProps {
   anonId: string;
   onLeave: () => void;
 }
+
+type StudentTab = 'live' | 'worksheet' | 'practice';
 
 function parseRoomSnapshotData(
   roomId: string,
@@ -55,6 +75,34 @@ function parseRoomSnapshotData(
     createdBy: String(data.createdBy ?? ''),
     createdAtMs: createdAtVal?.toMillis?.() ?? Date.now(),
     updatedAtMs: updatedAtVal?.toMillis?.() ?? Date.now(),
+    activeDeckId: data.activeDeckId ? String(data.activeDeckId) : undefined,
+    activeDeckTitle: data.activeDeckTitle
+      ? String(data.activeDeckTitle)
+      : undefined,
+    currentPage:
+      data.currentPage != null ? Number(data.currentPage) : undefined,
+    totalPages: data.totalPages != null ? Number(data.totalPages) : undefined,
+    currentTextbookPage:
+      data.currentTextbookPage != null
+        ? Number(data.currentTextbookPage)
+        : undefined,
+    currentWorksheetPage:
+      data.currentWorksheetPage != null
+        ? Number(data.currentWorksheetPage)
+        : undefined,
+    activeSessionId: data.activeSessionId
+      ? String(data.activeSessionId)
+      : undefined,
+    lectureActive: Boolean(data.lectureActive),
+    lectureStartedAtMs:
+      data.lectureStartedAtMs != null
+        ? Number(data.lectureStartedAtMs)
+        : undefined,
+    lastEndedDeckId: data.lastEndedDeckId
+      ? String(data.lastEndedDeckId)
+      : undefined,
+    lastEndedPage:
+      data.lastEndedPage != null ? Number(data.lastEndedPage) : undefined,
   };
 }
 
@@ -65,16 +113,25 @@ export function StudentView({
   anonId,
   onLeave,
 }: StudentViewProps) {
+  const [activeTab, setActiveTab] = useState<StudentTab>('live');
   const [room, setRoom] = useState<RoomData | null>(null);
   const [roomLoaded, setRoomLoaded] = useState(false);
 
+  const [sessions, setSessions] = useState<LectureSession[]>([]);
+  const [comments, setComments] = useState<NoteComment[]>([]);
+  const [myLogs, setMyLogs] = useState<StudentLearningLog[]>([]);
+
   const [signalDocExists, setSignalDocExists] = useState(false);
-  const [signalStatus, setSignalStatus] = useState<'confused' | 'understood'>('understood');
+  const [signalStatus, setSignalStatus] = useState<'confused' | 'understood'>(
+    'understood'
+  );
   const [signalEpoch, setSignalEpoch] = useState(0);
   const [signalExpiresAtMs, setSignalExpiresAtMs] = useState(0);
 
   const [nowMs, setNowMs] = useState(() => Date.now());
-  const [lastSentAtMs, setLastSentAtMs] = useState(() => getStoredLastSentAt(roomId));
+  const [lastSentAtMs, setLastSentAtMs] = useState(() =>
+    getStoredLastSentAt(roomId)
+  );
   const [happyUntilMs, setHappyUntilMs] = useState(0);
   const [chatText, setChatText] = useState('');
   const [sending, setSending] = useState(false);
@@ -131,7 +188,6 @@ export function StudentView({
     }
   }, [room, roomId]);
 
-  // 0.5-second clock for 45s confusion auto-clear and 15s cooldown
   useEffect(() => {
     const timer = window.setInterval(() => {
       setNowMs(Date.now());
@@ -156,7 +212,10 @@ export function StudentView({
         try {
           handleFirestoreError(error, OperationType.GET, roomPath);
         } catch {
-          showFeedback('ルーム状態の同期に失敗しました。再読み込みしてください。', true);
+          showFeedback(
+            'ルーム状態の同期に失敗しました。再読み込みしてください。',
+            true
+          );
         }
       }
     );
@@ -164,7 +223,20 @@ export function StudentView({
     return () => unsubscribe();
   }, [roomId, showFeedback]);
 
-  // Sync room state from server when mobile Safari returns from background / focus
+  // Subscribe to lecture sessions, note comments & this student's personal logs
+  useEffect(() => {
+    const unsubSessions = subscribeLectureSessions(roomId, (list) =>
+      setSessions(list)
+    );
+    const unsubComments = subscribeNoteComments(roomId, setComments);
+    const unsubLogs = subscribeStudentLogs(roomId, user.uid, setMyLogs);
+    return () => {
+      unsubSessions();
+      unsubComments();
+      unsubLogs();
+    };
+  }, [roomId, user.uid]);
+
   useEffect(() => {
     const handleSync = () => {
       if (document.visibilityState === 'visible') {
@@ -223,7 +295,6 @@ export function StudentView({
     );
   }, [nowMs, room, signalEpoch, signalExpiresAtMs, signalStatus]);
 
-  // Safety-net sync during active 45s countdown so teacher reset always stops it even on flaky mobile connections
   useEffect(() => {
     if (!isConfusedActive) return;
     const syncTimer = window.setInterval(() => {
@@ -244,7 +315,6 @@ export function StudentView({
   const isCooldownActive = cooldownSecondsLeft > 0;
   const isHappyActive = happyUntilMs > nowMs && !isConfusedActive;
 
-  // Auto-sync Firestore back to understood when 45s passes
   useEffect(() => {
     if (
       !room ||
@@ -273,7 +343,7 @@ export function StudentView({
       try {
         handleFirestoreError(error, OperationType.UPDATE, signalPath);
       } catch {
-        // Ignore auto-expiry sync failure if teacher already reset epoch
+        // Ignore
       }
     });
   }, [
@@ -288,12 +358,57 @@ export function StudentView({
     signalStatus,
   ]);
 
+  const recordPersonalLog = useCallback(
+    async (
+      targetRoom: RoomData,
+      eventType: StudentLearningLog['eventType'],
+      detail: string
+    ) => {
+      const deck = getDeckById(targetRoom.activeDeckId);
+      const slidePage = targetRoom.currentPage ?? 1;
+      const meta = getSlideMeta(deck, slidePage);
+      await persistStudentLog(roomId, {
+        id: `log_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+        roomId,
+        studentUid: user.uid,
+        studentEmail: user.email ?? '',
+        studentName: user.displayName ?? anonId,
+        deckId: deck?.id ?? targetRoom.activeDeckId ?? 'm1-ch1-s1',
+        deckTitle: deck?.title ?? targetRoom.activeDeckTitle ?? '数学Ⅰ',
+        chapter: deck?.chapter ?? 1,
+        slidePage,
+        textbookPage: meta?.textbookPage ?? targetRoom.currentTextbookPage ?? null,
+        worksheetPage:
+          meta?.worksheetPage ?? targetRoom.currentWorksheetPage ?? 1,
+        topic: meta?.topic ?? `スライド p.${slidePage}`,
+        eventType,
+        detail,
+        createdAtMs: Date.now(),
+      });
+    },
+    [anonId, roomId, user.displayName, user.email, user.uid]
+  );
+
   const writeSignalWithEpoch = async (
     targetRoom: RoomData,
-    nextStatus: 'confused' | 'understood'
+    nextStatus: 'confused' | 'understood',
+    includeSlideContext = true
   ) => {
     const nextExpiresAtMs =
-      nextStatus === 'confused' ? Math.trunc(Date.now() + CONFUSION_DURATION_MS) : 0;
+      nextStatus === 'confused'
+        ? Math.trunc(Date.now() + CONFUSION_DURATION_MS)
+        : 0;
+
+    const slideExtra =
+      includeSlideContext && targetRoom.activeDeckId
+        ? {
+            deckId: targetRoom.activeDeckId,
+            slidePage: targetRoom.currentPage ?? 1,
+            textbookPage: targetRoom.currentTextbookPage ?? 0,
+            worksheetPage: targetRoom.currentWorksheetPage ?? 1,
+            sessionId: targetRoom.activeSessionId ?? '',
+          }
+        : {};
 
     if (!signalDocExists) {
       await setDoc(doc(db, 'rooms', roomId, 'signals', signalDocId), {
@@ -305,6 +420,7 @@ export function StudentView({
         status: nextStatus,
         epoch: targetRoom.resetEpoch,
         expiresAtMs: nextExpiresAtMs,
+        ...slideExtra,
         createdAt: serverTimestamp(),
         updatedAt: serverTimestamp(),
       });
@@ -314,6 +430,7 @@ export function StudentView({
         status: nextStatus,
         epoch: targetRoom.resetEpoch,
         expiresAtMs: nextExpiresAtMs,
+        ...slideExtra,
         updatedAt: serverTimestamp(),
       });
     }
@@ -333,15 +450,20 @@ export function StudentView({
       }
 
       try {
-        await writeSignalWithEpoch(latestRoom, nextStatus);
+        await writeSignalWithEpoch(latestRoom, nextStatus, true);
       } catch {
-        // Retry once after fetching latest server room state in case resetEpoch changed mid-request
-        const retriedRoom = await refreshRoomFromServer();
-        if (!retriedRoom || !retriedRoom.teacherUid) {
-          throw new Error('Room unavailable');
-        }
-        await writeSignalWithEpoch(retriedRoom, nextStatus);
+        // Fallback without optional slide fields in case old firestore.rules is still deployed
+        const retriedRoom = (await refreshRoomFromServer()) ?? latestRoom;
+        await writeSignalWithEpoch(retriedRoom, nextStatus, false);
       }
+
+      void recordPersonalLog(
+        latestRoom,
+        nextStatus,
+        nextStatus === 'confused'
+          ? '授業中に「わからない！」を送信'
+          : '授業中に「わかった！」を送信'
+      );
 
       if (nextStatus === 'understood') {
         setHappyUntilMs(Date.now() + 3000);
@@ -366,8 +488,20 @@ export function StudentView({
   const writeMessageWithEpoch = async (
     targetRoom: RoomData,
     trimmed: string,
-    kind: 'quick' | 'chat'
+    kind: 'quick' | 'chat',
+    includeSlideContext = true
   ) => {
+    const slideExtra =
+      includeSlideContext && targetRoom.activeDeckId
+        ? {
+            deckId: targetRoom.activeDeckId,
+            slidePage: targetRoom.currentPage ?? 1,
+            textbookPage: targetRoom.currentTextbookPage ?? 0,
+            worksheetPage: targetRoom.currentWorksheetPage ?? 1,
+            sessionId: targetRoom.activeSessionId ?? '',
+          }
+        : {};
+
     await addDoc(collection(db, 'rooms', roomId, 'messages'), {
       roomId,
       ownerUid: user.uid,
@@ -378,6 +512,7 @@ export function StudentView({
       kind,
       epoch: targetRoom.resetEpoch,
       resolved: false,
+      ...slideExtra,
       createdAt: serverTimestamp(),
       updatedAt: serverTimestamp(),
     });
@@ -404,19 +539,16 @@ export function StudentView({
       }
 
       try {
-        await writeMessageWithEpoch(latestRoom, trimmed, kind);
+        await writeMessageWithEpoch(latestRoom, trimmed, kind, true);
       } catch {
-        // Retry once with refreshed server epoch if teacher reset right as message was sent
-        const retriedRoom = await refreshRoomFromServer();
-        if (!retriedRoom || !retriedRoom.teacherUid) {
+        const retriedRoom = (await refreshRoomFromServer()) ?? latestRoom;
+        if (!retriedRoom.teacherUid || retriedRoom.chatPaused) {
           throw new Error('Room unavailable');
         }
-        if (retriedRoom.chatPaused) {
-          showFeedback('先生がチャット送信を一時停止しています。', true);
-          return;
-        }
-        await writeMessageWithEpoch(retriedRoom, trimmed, kind);
+        await writeMessageWithEpoch(retriedRoom, trimmed, kind, false);
       }
+
+      void recordPersonalLog(latestRoom, 'question', trimmed);
 
       const sentAt = Date.now();
       setLastSentAtMs(sentAt);
@@ -463,13 +595,15 @@ export function StudentView({
       className={`${
         isPipOpen
           ? 'w-full h-full p-2'
-          : 'w-full max-w-[320px] sm:w-[290px] min-h-[296px] p-3.5 border border-slate-200 rounded-2xl shadow-sm'
+          : 'w-full max-w-[340px] sm:w-[310px] min-h-[300px] p-3.5 border border-slate-200 rounded-2xl shadow-sm'
       } bg-white text-slate-900 flex flex-col justify-between gap-2 overflow-hidden box-border`}
     >
       {/* Top Meta Row */}
       <div className="flex items-center justify-between gap-2 text-[11px] leading-none shrink-0 select-none">
         <span className="font-semibold text-slate-800 truncate">{anonId}</span>
-        <span className="font-mono-tabular text-slate-500 shrink-0">{roomId}</span>
+        <span className="font-mono-tabular text-slate-500 shrink-0">
+          {roomId}
+        </span>
       </div>
 
       {/* Mascot & Status */}
@@ -533,7 +667,12 @@ export function StudentView({
           <button
             key={phrase}
             type="button"
-            disabled={!isRoomReady || Boolean(room?.chatPaused) || isCooldownActive || sending}
+            disabled={
+              !isRoomReady ||
+              Boolean(room?.chatPaused) ||
+              isCooldownActive ||
+              sending
+            }
             onClick={() => void sendMessage(phrase, 'quick')}
             title={phrase}
             className="py-1.5 sm:py-1 px-1 text-[10px] font-medium leading-tight text-slate-700 bg-slate-100 hover:bg-blue-50 hover:text-blue-700 border border-slate-200 rounded-md transition-colors cursor-pointer disabled:opacity-45 disabled:cursor-not-allowed truncate"
@@ -558,7 +697,9 @@ export function StudentView({
           maxLength={140}
           autoComplete="off"
           enterKeyHint="send"
-          disabled={!isRoomReady || Boolean(room?.chatPaused) || isCooldownActive}
+          disabled={
+            !isRoomReady || Boolean(room?.chatPaused) || isCooldownActive
+          }
           placeholder={
             room?.chatPaused
               ? '送信停止中'
@@ -616,8 +757,8 @@ export function StudentView({
   return (
     <div className="min-h-screen bg-slate-50 text-slate-900 flex flex-col">
       {/* Main Window Top Bar */}
-      <header className="bg-white border-b border-slate-200">
-        <div className="max-w-4xl mx-auto px-4 sm:px-6 py-3.5 flex items-center justify-between gap-4">
+      <header className="bg-white border-b border-slate-200 sticky top-0 z-30">
+        <div className="max-w-6xl mx-auto px-4 sm:px-6 py-3 flex flex-wrap items-center justify-between gap-3">
           <div className="flex items-center gap-2.5 min-w-0">
             <span className="text-base font-bold text-slate-900 whitespace-nowrap">
               ClassPulse
@@ -630,10 +771,50 @@ export function StudentView({
             </span>
           </div>
 
+          {/* Student Navigation Tabs */}
+          <nav className="flex items-center gap-1 p-1 bg-slate-100 rounded-lg text-xs">
+            <button
+              type="button"
+              onClick={() => setActiveTab('live')}
+              className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md font-semibold transition-colors cursor-pointer ${
+                activeTab === 'live'
+                  ? 'bg-white text-slate-900 shadow-xs'
+                  : 'text-slate-600 hover:text-slate-900'
+              }`}
+            >
+              <Radio className="w-3.5 h-3.5 text-rose-500" />
+              <span>授業リアクション</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => setActiveTab('worksheet')}
+              className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md font-semibold transition-colors cursor-pointer ${
+                activeTab === 'worksheet'
+                  ? 'bg-white text-slate-900 shadow-xs'
+                  : 'text-slate-600 hover:text-slate-900'
+              }`}
+            >
+              <FileText className="w-3.5 h-3.5 text-emerald-600" />
+              <span>ワーク＆講義記録</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => setActiveTab('practice')}
+              className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md font-semibold transition-colors cursor-pointer ${
+                activeTab === 'practice'
+                  ? 'bg-white text-slate-900 shadow-xs'
+                  : 'text-slate-600 hover:text-slate-900'
+              }`}
+            >
+              <Brain className="w-3.5 h-3.5 text-indigo-600" />
+              <span>AI個別演習</span>
+            </button>
+          </nav>
+
           <div className="flex items-center gap-2 shrink-0">
-            {!isPipOpen && (
+            {!isPipOpen && activeTab === 'live' && (
               <div
-                className="hidden sm:flex items-center gap-0.5 p-0.5 bg-slate-100 rounded-lg text-[11px]"
+                className="hidden md:flex items-center gap-0.5 p-0.5 bg-slate-100 rounded-lg text-[11px]"
                 aria-label="小窓サイズ"
               >
                 <button
@@ -645,7 +826,7 @@ export function StudentView({
                       : 'text-slate-600 hover:text-slate-900'
                   }`}
                 >
-                  極小 (248×276)
+                  極小
                 </button>
                 <button
                   type="button"
@@ -656,17 +837,17 @@ export function StudentView({
                       : 'text-slate-600 hover:text-slate-900'
                   }`}
                 >
-                  標準 (280×300)
+                  標準
                 </button>
               </div>
             )}
             <button
               type="button"
               onClick={isPipOpen ? closePip : () => void openPip()}
-              className="hidden sm:inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-semibold text-white bg-blue-600 hover:bg-blue-700 rounded-lg transition-colors cursor-pointer whitespace-nowrap"
+              className="hidden sm:inline-flex items-center gap-1.5 px-3 py-2 text-xs font-semibold text-white bg-blue-600 hover:bg-blue-700 rounded-lg transition-colors cursor-pointer whitespace-nowrap"
             >
               <PictureInPicture2 className="w-4 h-4" />
-              <span>{isPipOpen ? '小窓を閉じる' : '小窓モードで起動'}</span>
+              <span>{isPipOpen ? '小窓を閉じる' : '小窓モード'}</span>
             </button>
             <button
               type="button"
@@ -684,7 +865,7 @@ export function StudentView({
       </header>
 
       {/* Main Content */}
-      <main className="flex-1 flex flex-col items-center justify-center p-4 sm:p-6 gap-4">
+      <main className="flex-1 flex flex-col items-center p-4 sm:p-6 gap-4">
         {pipNotice && (
           <div className="max-w-md w-full bg-amber-50 border border-amber-200 rounded-xl p-4 flex items-start justify-between gap-3 text-xs text-amber-900 leading-relaxed">
             <p>{pipNotice}</p>
@@ -699,42 +880,96 @@ export function StudentView({
           </div>
         )}
 
-        {!isRoomReady && roomLoaded && (
-          <div className="max-w-md w-full bg-white border border-slate-200 rounded-xl px-4 py-3 text-xs text-slate-600 text-center">
-            先生が教員モードでルーム「
-            <span className="font-mono-tabular font-semibold text-slate-900">
-              {roomId}
+        {/* Live Slide Sync Strip */}
+        {room?.activeDeckTitle && (
+          <div className="w-full max-w-6xl bg-indigo-50 border border-indigo-200 rounded-xl px-4 py-2.5 flex flex-wrap items-center justify-between gap-2 text-xs">
+            <div className="flex flex-wrap items-center gap-2">
+              {room.lectureActive && (
+                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-rose-600 text-white font-bold text-[10px]">
+                  <span className="w-1.5 h-1.5 rounded-full bg-white animate-pulse" />
+                  授業中
+                </span>
+              )}
+              <span className="font-bold text-indigo-950">
+                {room.activeDeckTitle}
+              </span>
+              <span className="px-2 py-0.5 rounded bg-white border border-indigo-200 font-mono-tabular font-semibold text-indigo-800">
+                板書 p.{room.currentPage ?? 1} / {room.totalPages ?? '-'}
+              </span>
+              {room.currentTextbookPage ? (
+                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-blue-100 text-blue-800 font-semibold">
+                  <BookOpen className="w-3 h-3" />
+                  教科書 p.{room.currentTextbookPage}
+                </span>
+              ) : null}
+              {room.currentWorksheetPage ? (
+                <button
+                  type="button"
+                  onClick={() => setActiveTab('worksheet')}
+                  className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-emerald-600 hover:bg-emerald-700 text-white font-semibold cursor-pointer"
+                >
+                  <FileText className="w-3 h-3" />
+                  ワークシート p.{room.currentWorksheetPage} を開く
+                </button>
+              ) : null}
+            </div>
+            <span className="text-[11px] text-indigo-700">
+              「わからない！」はこのページに自動紐づけされます
             </span>
-            」を開くと、自動的に送信できるようになります。
           </div>
         )}
 
-        {isPipOpen && pipContainer ? (
-          <>
-            {createPortal(companionCard, pipContainer)}
-            <div className="max-w-sm w-full bg-white border border-slate-200 rounded-xl p-6 text-center space-y-3">
-              <p className="text-sm font-semibold text-slate-900">
-                最前面の小窓（{pipDimensions.width}×{pipDimensions.height}px）を起動中です
-              </p>
-              <p className="text-xs text-slate-600 leading-relaxed">
-                別ウィンドウで操作できます。このタブを閉じると小窓も終了します。
-              </p>
-              <button
-                type="button"
-                onClick={closePip}
-                className="px-4 py-2 text-xs font-medium text-slate-700 bg-slate-100 hover:bg-slate-200 rounded-lg transition-colors cursor-pointer"
-              >
-                通常画面に戻す
-              </button>
-            </div>
-          </>
-        ) : (
-          <div className="w-full flex flex-col items-center gap-3">
-            {companionCard}
-            <p className="text-xs text-slate-500 text-center">
-              あなたの匿名ID: {anonId}
-            </p>
+        {isPipOpen && pipContainer && createPortal(companionCard, pipContainer)}
+
+        {activeTab === 'live' ? (
+          <div className="flex-1 flex flex-col items-center justify-center gap-4 w-full">
+            {!isRoomReady && roomLoaded && (
+              <div className="max-w-md w-full bg-white border border-slate-200 rounded-xl px-4 py-3 text-xs text-slate-600 text-center">
+                先生が教員モードでルーム「
+                <span className="font-mono-tabular font-semibold text-slate-900">
+                  {roomId}
+                </span>
+                」を開くと、自動的に送信できるようになります。
+              </div>
+            )}
+
+            {isPipOpen && pipContainer ? (
+              <div className="max-w-sm w-full bg-white border border-slate-200 rounded-xl p-6 text-center space-y-3">
+                <p className="text-sm font-semibold text-slate-900">
+                  最前面の小窓（{pipDimensions.width}×{pipDimensions.height}px）を起動中です
+                </p>
+                <p className="text-xs text-slate-600 leading-relaxed">
+                  別ウィンドウで操作できます。このまま「ワーク＆講義記録」や「AI個別演習」タブも見られます。
+                </p>
+                <button
+                  type="button"
+                  onClick={closePip}
+                  className="px-4 py-2 text-xs font-medium text-slate-700 bg-slate-100 hover:bg-slate-200 rounded-lg transition-colors cursor-pointer"
+                >
+                  通常画面に戻す
+                </button>
+              </div>
+            ) : (
+              <div className="w-full flex flex-col items-center gap-3">
+                {companionCard}
+                <p className="text-xs text-slate-500 text-center">
+                  あなたの匿名ID: {anonId}（復習・AI演習はGoogleアカウントに紐づいて保存されます）
+                </p>
+              </div>
+            )}
           </div>
+        ) : (
+          <StudentStudyHub
+            key={activeTab}
+            user={user}
+            roomId={roomId}
+            anonId={anonId}
+            room={room}
+            sessions={sessions}
+            comments={comments}
+            myLogs={myLogs}
+            initialTab={activeTab === 'practice' ? 'practice' : 'worksheet'}
+          />
         )}
       </main>
     </div>

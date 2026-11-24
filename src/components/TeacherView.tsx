@@ -16,13 +16,16 @@ import {
 } from 'firebase/firestore';
 import {
   Ban,
+  BookOpenCheck,
   Check,
   CheckCircle2,
   Copy,
   LogOut,
+  MessageSquare,
   PauseCircle,
   PictureInPicture2,
   PlayCircle,
+  Presentation,
   Search,
   Volume2,
   VolumeX,
@@ -30,8 +33,23 @@ import {
 } from 'lucide-react';
 import { db, handleFirestoreError, OperationType } from '../firebase';
 import { useDocumentPiP } from '../hooks/useDocumentPiP';
-import type { MessageData, MuteData, RoomData, SignalData } from '../types';
+import {
+  subscribeLectureSessions,
+  subscribeNoteComments,
+  subscribeStudentLogs,
+} from '../services/lectureStore';
+import type {
+  LectureSession,
+  MessageData,
+  MuteData,
+  NoteComment,
+  RoomData,
+  SignalData,
+  StudentLearningLog,
+} from '../types';
 import { CONFUSION_DURATION_MS } from '../utils/identity';
+import { TeacherReviewDashboard } from './TeacherReviewDashboard';
+import { TeacherSlideProjector } from './TeacherSlideProjector';
 import { TeacherTickerBar } from './TeacherTickerBar';
 
 interface TeacherViewProps {
@@ -41,6 +59,7 @@ interface TeacherViewProps {
 }
 
 type HistoryFilter = 'all' | 'active' | 'resolved' | 'muted';
+type TeacherTab = 'projector' | 'review' | 'chat';
 
 export function TeacherView({ user, roomId, onLeave }: TeacherViewProps) {
   const [room, setRoom] = useState<RoomData | null>(null);
@@ -50,6 +69,16 @@ export function TeacherView({ user, roomId, onLeave }: TeacherViewProps) {
   const [signals, setSignals] = useState<SignalData[]>([]);
   const [messages, setMessages] = useState<MessageData[]>([]);
   const [mutes, setMutes] = useState<MuteData[]>([]);
+
+  // New Lecture Sessions, Comments & Student Learning Logs
+  const [sessions, setSessions] = useState<LectureSession[]>([]);
+  const [noteComments, setNoteComments] = useState<NoteComment[]>([]);
+  const [studentLogs, setStudentLogs] = useState<StudentLearningLog[]>([]);
+  const [cloudSynced, setCloudSynced] = useState(true);
+  const [activeTab, setActiveTab] = useState<TeacherTab>('projector');
+  const [reviewSessionId, setReviewSessionId] = useState<string | undefined>(
+    undefined
+  );
 
   const [nowMs, setNowMs] = useState(() => Date.now());
   const [isResetting, setIsResetting] = useState(false);
@@ -78,7 +107,6 @@ export function TeacherView({ user, roomId, onLeave }: TeacherViewProps) {
     bodyClassName: 'bg-slate-950 text-slate-100 antialiased',
   });
 
-  // 1s timer to auto-expire 45s confusion counts & update NEW highlight
   useEffect(() => {
     const timer = window.setInterval(() => {
       setNowMs(Date.now());
@@ -151,6 +179,35 @@ export function TeacherView({ user, roomId, onLeave }: TeacherViewProps) {
           createdBy: String(data.createdBy ?? ''),
           createdAtMs: data.createdAt?.toMillis?.() ?? Date.now(),
           updatedAtMs: data.updatedAt?.toMillis?.() ?? Date.now(),
+          activeDeckId: data.activeDeckId ? String(data.activeDeckId) : undefined,
+          activeDeckTitle: data.activeDeckTitle
+            ? String(data.activeDeckTitle)
+            : undefined,
+          currentPage:
+            data.currentPage != null ? Number(data.currentPage) : undefined,
+          totalPages:
+            data.totalPages != null ? Number(data.totalPages) : undefined,
+          currentTextbookPage:
+            data.currentTextbookPage != null
+              ? Number(data.currentTextbookPage)
+              : undefined,
+          currentWorksheetPage:
+            data.currentWorksheetPage != null
+              ? Number(data.currentWorksheetPage)
+              : undefined,
+          activeSessionId: data.activeSessionId
+            ? String(data.activeSessionId)
+            : undefined,
+          lectureActive: Boolean(data.lectureActive),
+          lectureStartedAtMs:
+            data.lectureStartedAtMs != null
+              ? Number(data.lectureStartedAtMs)
+              : undefined,
+          lastEndedDeckId: data.lastEndedDeckId
+            ? String(data.lastEndedDeckId)
+            : undefined,
+          lastEndedPage:
+            data.lastEndedPage != null ? Number(data.lastEndedPage) : undefined,
         });
       },
       (error) => {
@@ -159,6 +216,22 @@ export function TeacherView({ user, roomId, onLeave }: TeacherViewProps) {
     );
 
     return () => unsubscribe();
+  }, [ownershipError, roomId, roomReady]);
+
+  // Listen to lecture sessions, note comments & student logs
+  useEffect(() => {
+    if (!roomReady || ownershipError) return;
+    const unsubSessions = subscribeLectureSessions(roomId, (list, synced) => {
+      setSessions(list);
+      setCloudSynced(synced);
+    });
+    const unsubComments = subscribeNoteComments(roomId, setNoteComments);
+    const unsubLogs = subscribeStudentLogs(roomId, null, setStudentLogs);
+    return () => {
+      unsubSessions();
+      unsubComments();
+      unsubLogs();
+    };
   }, [ownershipError, roomId, roomReady]);
 
   // Listen to student signals
@@ -187,6 +260,15 @@ export function TeacherView({ user, roomId, onLeave }: TeacherViewProps) {
             expiresAtMs: Number(data.expiresAtMs ?? 0),
             createdAtMs: data.createdAt?.toMillis?.() ?? Date.now(),
             updatedAtMs: data.updatedAt?.toMillis?.() ?? Date.now(),
+            deckId: data.deckId ? String(data.deckId) : undefined,
+            slidePage:
+              data.slidePage != null ? Number(data.slidePage) : undefined,
+            textbookPage:
+              data.textbookPage != null ? Number(data.textbookPage) : undefined,
+            worksheetPage:
+              data.worksheetPage != null
+                ? Number(data.worksheetPage)
+                : undefined,
           };
         });
         setSignals(items);
@@ -222,11 +304,24 @@ export function TeacherView({ user, roomId, onLeave }: TeacherViewProps) {
               terminalId: String(data.terminalId ?? ''),
               anonId: String(data.anonId ?? '匿名'),
               text: String(data.text ?? ''),
-              kind: (data.kind === 'quick' ? 'quick' : 'chat') as 'quick' | 'chat',
+              kind: (data.kind === 'quick' ? 'quick' : 'chat') as
+                | 'quick'
+                | 'chat',
               epoch: Number(data.epoch ?? 0),
               resolved: Boolean(data.resolved),
               createdAtMs: data.createdAt?.toMillis?.() ?? Date.now(),
               updatedAtMs: data.updatedAt?.toMillis?.() ?? Date.now(),
+              deckId: data.deckId ? String(data.deckId) : undefined,
+              slidePage:
+                data.slidePage != null ? Number(data.slidePage) : undefined,
+              textbookPage:
+                data.textbookPage != null
+                  ? Number(data.textbookPage)
+                  : undefined,
+              worksheetPage:
+                data.worksheetPage != null
+                  ? Number(data.worksheetPage)
+                  : undefined,
             };
           })
           .sort((a, b) => b.createdAtMs - a.createdAtMs);
@@ -278,7 +373,6 @@ export function TeacherView({ user, roomId, onLeave }: TeacherViewProps) {
     [mutes]
   );
 
-  // Active confused student count (within 45s + minor clock skew tolerance, matching current resetEpoch, not muted)
   const confusedCount = useMemo(() => {
     if (!room) return 0;
     return signals.filter(
@@ -291,7 +385,6 @@ export function TeacherView({ user, roomId, onLeave }: TeacherViewProps) {
     ).length;
   }, [mutedTerminalIds, nowMs, room, signals]);
 
-  // Active ticker messages: current epoch, not resolved, not muted, oldest -> newest for marquee
   const activeTickerMessages = useMemo(() => {
     if (!room) return [];
     return messages
@@ -338,7 +431,10 @@ export function TeacherView({ user, roomId, onLeave }: TeacherViewProps) {
     }
   };
 
-  const handleResolveMessage = async (messageId: string, resolvedValue = true) => {
+  const handleResolveMessage = async (
+    messageId: string,
+    resolvedValue = true
+  ) => {
     const msgPath = `rooms/${roomId}/messages/${messageId}`;
     try {
       await updateDoc(doc(db, 'rooms', roomId, 'messages', messageId), {
@@ -408,7 +504,9 @@ export function TeacherView({ user, roomId, onLeave }: TeacherViewProps) {
           <h2 className="text-base font-bold text-slate-900">
             ルームのアクセス制限
           </h2>
-          <p className="text-sm text-slate-600 leading-relaxed">{ownershipError}</p>
+          <p className="text-sm text-slate-600 leading-relaxed">
+            {ownershipError}
+          </p>
           <button
             type="button"
             onClick={onLeave}
@@ -424,8 +522,8 @@ export function TeacherView({ user, roomId, onLeave }: TeacherViewProps) {
   return (
     <div className="min-h-screen bg-slate-50 text-slate-900 flex flex-col">
       {/* Top Bar */}
-      <header className="bg-white border-b border-slate-200">
-        <div className="max-w-6xl mx-auto px-6 py-3.5 flex items-center justify-between gap-6">
+      <header className="bg-white border-b border-slate-200 sticky top-0 z-30">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 py-3 flex flex-wrap items-center justify-between gap-4">
           <div className="flex items-center gap-3 min-w-0">
             <span className="text-base font-bold text-slate-900 whitespace-nowrap">
               ClassPulse
@@ -451,10 +549,60 @@ export function TeacherView({ user, roomId, onLeave }: TeacherViewProps) {
             </button>
           </div>
 
-          <div className="flex items-center gap-2.5 shrink-0">
+          {/* Center Tabs */}
+          <nav className="flex items-center gap-1 p-1 bg-slate-100 rounded-lg text-xs">
+            <button
+              type="button"
+              onClick={() => setActiveTab('projector')}
+              className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md font-semibold transition-colors cursor-pointer whitespace-nowrap ${
+                activeTab === 'projector'
+                  ? 'bg-white text-slate-900 shadow-xs'
+                  : 'text-slate-600 hover:text-slate-900'
+              }`}
+            >
+              <Presentation className="w-3.5 h-3.5 text-indigo-600" />
+              <span>スライド＆授業進行</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => setActiveTab('review')}
+              className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md font-semibold transition-colors cursor-pointer whitespace-nowrap ${
+                activeTab === 'review'
+                  ? 'bg-white text-slate-900 shadow-xs'
+                  : 'text-slate-600 hover:text-slate-900'
+              }`}
+            >
+              <BookOpenCheck className="w-3.5 h-3.5 text-emerald-600" />
+              <span>振り返り・講義記録</span>
+              {sessions.length > 0 && (
+                <span className="px-1.5 py-0.5 text-[10px] rounded-full bg-emerald-100 text-emerald-700 font-bold">
+                  {sessions.length}
+                </span>
+              )}
+            </button>
+            <button
+              type="button"
+              onClick={() => setActiveTab('chat')}
+              className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md font-semibold transition-colors cursor-pointer whitespace-nowrap ${
+                activeTab === 'chat'
+                  ? 'bg-white text-slate-900 shadow-xs'
+                  : 'text-slate-600 hover:text-slate-900'
+              }`}
+            >
+              <MessageSquare className="w-3.5 h-3.5 text-blue-600" />
+              <span>質問管理</span>
+              {activeTickerMessages.length > 0 && (
+                <span className="px-1.5 py-0.5 text-[10px] rounded-full bg-amber-100 text-amber-800 font-bold">
+                  {activeTickerMessages.length}
+                </span>
+              )}
+            </button>
+          </nav>
+
+          <div className="flex items-center gap-2 shrink-0">
             {!isPipOpen && (
               <div
-                className="hidden sm:flex items-center gap-0.5 p-0.5 bg-slate-100 rounded-lg text-[11px]"
+                className="hidden xl:flex items-center gap-0.5 p-0.5 bg-slate-100 rounded-lg text-[11px]"
                 aria-label="小窓サイズ"
               >
                 <button
@@ -466,7 +614,7 @@ export function TeacherView({ user, roomId, onLeave }: TeacherViewProps) {
                       : 'text-slate-600 hover:text-slate-900'
                   }`}
                 >
-                  小 (600×124)
+                  小
                 </button>
                 <button
                   type="button"
@@ -477,20 +625,18 @@ export function TeacherView({ user, roomId, onLeave }: TeacherViewProps) {
                       : 'text-slate-600 hover:text-slate-900'
                   }`}
                 >
-                  広 (840×136)
+                  広
                 </button>
               </div>
             )}
             <button
               type="button"
               onClick={isPipOpen ? closePip : () => void openPip()}
-              className="inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-semibold text-white bg-slate-900 hover:bg-slate-800 rounded-lg transition-colors cursor-pointer whitespace-nowrap"
+              className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-semibold text-white bg-slate-900 hover:bg-slate-800 rounded-lg transition-colors cursor-pointer whitespace-nowrap"
             >
               <PictureInPicture2 className="w-4 h-4 text-amber-400" />
-              <span>
-                {isPipOpen
-                  ? 'テロップ小窓を閉じる'
-                  : `小窓モードで起動 (${pipDimensions.width}×${pipDimensions.height})`}
+              <span className="hidden sm:inline">
+                {isPipOpen ? '小窓を閉じる' : 'テロップ小窓'}
               </span>
             </button>
             <button
@@ -509,7 +655,15 @@ export function TeacherView({ user, roomId, onLeave }: TeacherViewProps) {
       </header>
 
       {/* Main Teacher Console */}
-      <main className="max-w-6xl w-full mx-auto px-6 py-6 space-y-6">
+      <main className="max-w-7xl w-full mx-auto px-4 sm:px-6 py-5 space-y-5">
+        {!cloudSynced && (
+          <div className="bg-amber-50 border border-amber-200 rounded-xl px-4 py-2.5 text-xs text-amber-900">
+            ※ 講義記録・スライド連動は現在ローカル保存で動作しています。更新済みの{' '}
+            <code className="font-mono font-semibold">firestore.rules</code>{' '}
+            を Firebase コンソールへ反映すると、生徒端末ともクラウド同期されます。
+          </div>
+        )}
+
         {pipNotice && (
           <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 flex items-start justify-between gap-3 text-xs text-amber-900 leading-relaxed">
             <p>{pipNotice}</p>
@@ -524,41 +678,22 @@ export function TeacherView({ user, roomId, onLeave }: TeacherViewProps) {
           </div>
         )}
 
-        {/* Portal to Document PiP window when open, else show inline bar */}
+        {/* Portal to Document PiP window when open, else show compact inline ticker bar */}
         {isPipOpen && pipContainer ? (
-          <>
-            {createPortal(
-              <TeacherTickerBar
-                roomId={roomId}
-                confusedCount={confusedCount}
-                activeMessages={activeTickerMessages}
-                chatPaused={Boolean(room?.chatPaused)}
-                nowMs={nowMs}
-                isResetting={isResetting}
-                onResetAll={() => void handleResetAll()}
-                onResolveMessage={(id) => void handleResolveMessage(id, true)}
-                inPipWindow
-              />,
-              pipContainer
-            )}
-            <div className="bg-slate-900 text-slate-100 rounded-xl px-5 py-4 flex flex-wrap items-center justify-between gap-4">
-              <div className="space-y-0.5">
-                <p className="text-sm font-semibold">
-                  最前面の横長テロップ小窓（{pipDimensions.width}×{pipDimensions.height}px）を表示中
-                </p>
-                <p className="text-xs text-slate-400">
-                  小窓にはテロップと「わからない」人数のみを表示し、この画面でチャット履歴やミュート・送信停止を管理できます。
-                </p>
-              </div>
-              <button
-                type="button"
-                onClick={closePip}
-                className="px-3.5 py-2 text-xs font-medium text-slate-900 bg-white hover:bg-slate-100 rounded-lg transition-colors cursor-pointer whitespace-nowrap"
-              >
-                通常画面にテロップを戻す
-              </button>
-            </div>
-          </>
+          createPortal(
+            <TeacherTickerBar
+              roomId={roomId}
+              confusedCount={confusedCount}
+              activeMessages={activeTickerMessages}
+              chatPaused={Boolean(room?.chatPaused)}
+              nowMs={nowMs}
+              isResetting={isResetting}
+              onResetAll={() => void handleResetAll()}
+              onResolveMessage={(id) => void handleResolveMessage(id, true)}
+              inPipWindow
+            />,
+            pipContainer
+          )
         ) : (
           <section aria-label="ライブテロップバー">
             <TeacherTickerBar
@@ -574,232 +709,292 @@ export function TeacherView({ user, roomId, onLeave }: TeacherViewProps) {
           </section>
         )}
 
-        {/* Controls Grid: Chat Pause Switch & Mute Manager */}
-        <section className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-          {/* Chat Pause Switch */}
-          <div className="bg-white border border-slate-200 rounded-xl p-5 flex items-center justify-between gap-4">
-            <div className="space-y-1">
-              <div className="flex items-center gap-2">
-                {room?.chatPaused ? (
-                  <PauseCircle className="w-4 h-4 text-amber-600" />
+        {/* Tab 1: Slide Projector & Recording */}
+        {activeTab === 'projector' && (
+          <TeacherSlideProjector
+            roomId={roomId}
+            teacherUid={user.uid}
+            room={room}
+            confusedCount={confusedCount}
+            signals={signals}
+            messages={messages}
+            sessions={sessions}
+            onSessionSaved={(saved) => {
+              setSessions((prev) => [
+                saved,
+                ...prev.filter((s) => s.id !== saved.id),
+              ]);
+            }}
+            onJumpToReview={(sessionId) => {
+              setReviewSessionId(sessionId);
+              setActiveTab('review');
+            }}
+          />
+        )}
+
+        {/* Tab 2: Review & Lecture Notes Dashboard */}
+        {activeTab === 'review' && (
+          <TeacherReviewDashboard
+            roomId={roomId}
+            teacherUid={user.uid}
+            teacherName={user.displayName || user.email || '担当教員'}
+            sessions={sessions}
+            comments={noteComments}
+            studentLogs={studentLogs}
+            initialSessionId={reviewSessionId}
+          />
+        )}
+
+        {/* Tab 3: Chat Management & Controls */}
+        {activeTab === 'chat' && (
+          <div className="space-y-5">
+            <section className="grid grid-cols-1 lg:grid-cols-2 gap-5">
+              <div className="bg-white border border-slate-200 rounded-xl p-5 flex items-center justify-between gap-4">
+                <div className="space-y-1">
+                  <div className="flex items-center gap-2">
+                    {room?.chatPaused ? (
+                      <PauseCircle className="w-4 h-4 text-amber-600" />
+                    ) : (
+                      <PlayCircle className="w-4 h-4 text-emerald-600" />
+                    )}
+                    <h2 className="text-sm font-bold text-slate-900">
+                      チャット送信の一時停止スイッチ
+                    </h2>
+                  </div>
+                  <p className="text-xs text-slate-600 leading-relaxed">
+                    {room?.chatPaused
+                      ? '現在、生徒からの匿名チャット・定型文送信を一時停止しています（「わからない！」ボタンは利用可能です）。'
+                      : '現在、すべての生徒が匿名チャット・定型文を送信できます。'}
+                  </p>
+                </div>
+
+                <button
+                  type="button"
+                  role="switch"
+                  aria-checked={Boolean(room?.chatPaused)}
+                  onClick={() => void handleToggleChatPaused()}
+                  className={`px-4 py-2 text-xs font-semibold rounded-lg transition-colors cursor-pointer whitespace-nowrap shrink-0 ${
+                    room?.chatPaused
+                      ? 'bg-amber-600 hover:bg-amber-700 text-white'
+                      : 'bg-slate-900 hover:bg-slate-800 text-white'
+                  }`}
+                >
+                  {room?.chatPaused ? '送信を再開する' : '送信を一時停止'}
+                </button>
+              </div>
+
+              <div className="bg-white border border-slate-200 rounded-xl p-5 space-y-3">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <VolumeX className="w-4 h-4 text-slate-700" />
+                    <h2 className="text-sm font-bold text-slate-900">
+                      ミュート中の匿名ID
+                    </h2>
+                  </div>
+                  <span className="text-xs font-mono-tabular text-slate-500">
+                    {mutes.length}件
+                  </span>
+                </div>
+
+                {mutes.length === 0 ? (
+                  <p className="text-xs text-slate-500">
+                    ミュート中の端末はありません。荒らし投稿などがある場合は下の履歴一覧からミュートできます。
+                  </p>
                 ) : (
-                  <PlayCircle className="w-4 h-4 text-emerald-600" />
+                  <div className="flex flex-wrap gap-2">
+                    {mutes.map((m) => (
+                      <button
+                        key={m.id}
+                        type="button"
+                        onClick={() => void handleUnmuteTerminal(m.terminalId)}
+                        className="inline-flex items-center gap-1.5 px-2.5 py-1 text-xs font-medium text-slate-700 bg-slate-100 hover:bg-slate-200 border border-slate-200 rounded-lg transition-colors cursor-pointer"
+                        title="クリックしてミュート解除"
+                      >
+                        <span>{m.anonId}</span>
+                        <Volume2 className="w-3.5 h-3.5 text-slate-500" />
+                      </button>
+                    ))}
+                  </div>
                 )}
-                <h2 className="text-sm font-bold text-slate-900">
-                  チャット送信の一時停止スイッチ
-                </h2>
               </div>
-              <p className="text-xs text-slate-600 leading-relaxed">
-                {room?.chatPaused
-                  ? '現在、生徒からの匿名チャット・定型文送信を一時停止しています（「わからない！」ボタンは利用可能です）。'
-                  : '現在、すべての生徒が匿名チャット・定型文を送信できます。'}
-              </p>
-            </div>
+            </section>
 
-            <button
-              type="button"
-              role="switch"
-              aria-checked={Boolean(room?.chatPaused)}
-              onClick={() => void handleToggleChatPaused()}
-              className={`px-4 py-2 text-xs font-semibold rounded-lg transition-colors cursor-pointer whitespace-nowrap shrink-0 ${
-                room?.chatPaused
-                  ? 'bg-amber-600 hover:bg-amber-700 text-white'
-                  : 'bg-slate-900 hover:bg-slate-800 text-white'
-              }`}
-            >
-              {room?.chatPaused ? '送信を再開する' : '送信を一時停止'}
-            </button>
-          </div>
+            <section className="bg-white border border-slate-200 rounded-xl overflow-hidden">
+              <div className="px-5 py-4 border-b border-slate-200 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                <div className="flex items-center gap-3">
+                  <h2 className="text-sm font-bold text-slate-900">
+                    全チャット履歴一覧
+                  </h2>
+                  <span className="text-xs font-mono-tabular text-slate-500">
+                    全 {messages.length}件
+                  </span>
+                </div>
 
-          {/* Muted IDs List */}
-          <div className="bg-white border border-slate-200 rounded-xl p-5 space-y-3">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                <VolumeX className="w-4 h-4 text-slate-700" />
-                <h2 className="text-sm font-bold text-slate-900">
-                  ミュート中の匿名ID
-                </h2>
-              </div>
-              <span className="text-xs font-mono-tabular text-slate-500">
-                {mutes.length}件
-              </span>
-            </div>
-
-            {mutes.length === 0 ? (
-              <p className="text-xs text-slate-500">
-                ミュート中の端末はありません。荒らし投稿などがある場合は下の履歴一覧からミュートできます。
-              </p>
-            ) : (
-              <div className="flex flex-wrap gap-2">
-                {mutes.map((m) => (
-                  <button
-                    key={m.id}
-                    type="button"
-                    onClick={() => void handleUnmuteTerminal(m.terminalId)}
-                    className="inline-flex items-center gap-1.5 px-2.5 py-1 text-xs font-medium text-slate-700 bg-slate-100 hover:bg-slate-200 border border-slate-200 rounded-lg transition-colors cursor-pointer"
-                    title="クリックしてミュート解除"
-                  >
-                    <span>{m.anonId}</span>
-                    <Volume2 className="w-3.5 h-3.5 text-slate-500" />
-                  </button>
-                ))}
-              </div>
-            )}
-          </div>
-        </section>
-
-        {/* Full Chat History Section */}
-        <section className="bg-white border border-slate-200 rounded-xl overflow-hidden">
-          <div className="px-5 py-4 border-b border-slate-200 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-            <div className="flex items-center gap-3">
-              <h2 className="text-sm font-bold text-slate-900">全チャット履歴一覧</h2>
-              <span className="text-xs font-mono-tabular text-slate-500">
-                全 {messages.length}件
-              </span>
-            </div>
-
-            <div className="flex flex-wrap items-center gap-3">
-              {/* Filter Segmented Control */}
-              <div className="flex items-center gap-1 p-1 bg-slate-100 rounded-lg">
-                {(
-                  [
-                    { key: 'all', label: 'すべて' },
-                    { key: 'active', label: '未対応' },
-                    { key: 'resolved', label: '対応済み' },
-                    { key: 'muted', label: 'ミュート' },
-                  ] as const
-                ).map((item) => (
-                  <button
-                    key={item.key}
-                    type="button"
-                    onClick={() => setFilter(item.key)}
-                    className={`px-2.5 py-1 text-xs font-medium rounded-md transition-colors cursor-pointer whitespace-nowrap ${
-                      filter === item.key
-                        ? 'bg-white text-slate-900 shadow-xs'
-                        : 'text-slate-600 hover:text-slate-900'
-                    }`}
-                  >
-                    {item.label}
-                  </button>
-                ))}
-              </div>
-
-              {/* Search Input */}
-              <div className="relative">
-                <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
-                <input
-                  type="text"
-                  value={searchQuery}
-                  onChange={(e) => setSearchQuery(e.target.value)}
-                  placeholder="本文・匿名IDを検索..."
-                  className="pl-8 pr-3 py-1.5 text-xs bg-slate-50 border border-slate-200 rounded-lg text-slate-900 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500 w-48"
-                />
-              </div>
-            </div>
-          </div>
-
-          {filteredHistory.length === 0 ? (
-            <div className="px-6 py-12 text-center text-xs text-slate-500">
-              表示できるメッセージ履歴がありません。
-            </div>
-          ) : (
-            <div className="overflow-x-auto">
-              <table className="w-full text-left border-collapse">
-                <thead>
-                  <tr className="border-b border-slate-200 bg-slate-50/70 text-[11px] font-semibold text-slate-500">
-                    <th className="py-2.5 px-4 whitespace-nowrap">時刻</th>
-                    <th className="py-2.5 px-4 whitespace-nowrap">匿名ID</th>
-                    <th className="py-2.5 px-4 whitespace-nowrap">種別</th>
-                    <th className="py-2.5 px-4">メッセージ</th>
-                    <th className="py-2.5 px-4 whitespace-nowrap">状態</th>
-                    <th className="py-2.5 px-4 text-right whitespace-nowrap">操作</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-100 text-xs">
-                  {filteredHistory.map((msg) => {
-                    const isMuted = mutedTerminalIds.has(msg.terminalId);
-                    const isClearedByReset = room ? msg.epoch < room.resetEpoch : false;
-                    const isEffectivelyResolved = msg.resolved || isClearedByReset;
-                    const timeStr = new Date(msg.createdAtMs).toLocaleTimeString('ja-JP', {
-                      hour: '2-digit',
-                      minute: '2-digit',
-                      second: '2-digit',
-                    });
-
-                    return (
-                      <tr
-                        key={msg.id}
-                        className={`hover:bg-slate-50 transition-colors ${
-                          isMuted ? 'opacity-55' : ''
+                <div className="flex flex-wrap items-center gap-3">
+                  <div className="flex items-center gap-1 p-1 bg-slate-100 rounded-lg">
+                    {(
+                      [
+                        { key: 'all', label: 'すべて' },
+                        { key: 'active', label: '未対応' },
+                        { key: 'resolved', label: '対応済み' },
+                        { key: 'muted', label: 'ミュート' },
+                      ] as const
+                    ).map((item) => (
+                      <button
+                        key={item.key}
+                        type="button"
+                        onClick={() => setFilter(item.key)}
+                        className={`px-2.5 py-1 text-xs font-medium rounded-md transition-colors cursor-pointer whitespace-nowrap ${
+                          filter === item.key
+                            ? 'bg-white text-slate-900 shadow-xs'
+                            : 'text-slate-600 hover:text-slate-900'
                         }`}
                       >
-                        <td className="py-2.5 px-4 font-mono-tabular text-slate-500 whitespace-nowrap">
-                          {timeStr}
-                        </td>
-                        <td className="py-2.5 px-4 font-medium text-slate-800 whitespace-nowrap">
-                          {msg.anonId}
-                        </td>
-                        <td className="py-2.5 px-4 text-slate-500 whitespace-nowrap">
-                          {msg.kind === 'quick' ? '定型文' : 'チャット'}
-                        </td>
-                        <td className="py-2.5 px-4 text-slate-900 font-medium min-w-[200px]">
-                          {msg.text}
-                        </td>
-                        <td className="py-2.5 px-4 whitespace-nowrap">
-                          {isMuted ? (
-                            <span className="text-slate-500 font-medium">ミュート中</span>
-                          ) : isEffectivelyResolved ? (
-                            <span className="text-emerald-600 font-medium">対応済み</span>
-                          ) : (
-                            <span className="text-amber-600 font-semibold">テロップ表示中</span>
-                          )}
-                        </td>
-                        <td className="py-2.5 px-4 text-right whitespace-nowrap">
-                          <div className="inline-flex items-center gap-2">
-                            {!isClearedByReset && (
-                              <button
-                                type="button"
-                                onClick={() =>
-                                  void handleResolveMessage(msg.id, !msg.resolved)
-                                }
-                                className="inline-flex items-center gap-1 px-2.5 py-1 text-[11px] font-medium text-slate-700 bg-slate-100 hover:bg-slate-200 rounded-md transition-colors cursor-pointer"
-                              >
-                                <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
-                                <span>{msg.resolved ? '未対応に戻す' : '対応済み'}</span>
-                              </button>
-                            )}
+                        {item.label}
+                      </button>
+                    ))}
+                  </div>
 
-                            {isMuted ? (
-                              <button
-                                type="button"
-                                onClick={() => void handleUnmuteTerminal(msg.terminalId)}
-                                className="inline-flex items-center gap-1 px-2.5 py-1 text-[11px] font-medium text-blue-700 bg-blue-50 hover:bg-blue-100 rounded-md transition-colors cursor-pointer"
-                              >
-                                <Volume2 className="w-3.5 h-3.5" />
-                                <span>解除</span>
-                              </button>
-                            ) : (
-                              <button
-                                type="button"
-                                onClick={() =>
-                                  void handleMuteTerminal(msg.terminalId, msg.anonId)
-                                }
-                                className="inline-flex items-center gap-1 px-2.5 py-1 text-[11px] font-medium text-rose-700 bg-rose-50 hover:bg-rose-100 rounded-md transition-colors cursor-pointer"
-                              >
-                                <Ban className="w-3.5 h-3.5" />
-                                <span>ミュート</span>
-                              </button>
-                            )}
-                          </div>
-                        </td>
+                  <div className="relative">
+                    <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                    <input
+                      type="text"
+                      value={searchQuery}
+                      onChange={(e) => setSearchQuery(e.target.value)}
+                      placeholder="本文・匿名IDを検索..."
+                      className="pl-8 pr-3 py-1.5 text-xs bg-slate-50 border border-slate-200 rounded-lg text-slate-900 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500 w-48"
+                    />
+                  </div>
+                </div>
+              </div>
+
+              {filteredHistory.length === 0 ? (
+                <div className="px-6 py-12 text-center text-xs text-slate-500">
+                  表示できるメッセージ履歴がありません。
+                </div>
+              ) : (
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left border-collapse">
+                    <thead>
+                      <tr className="border-b border-slate-200 bg-slate-50/70 text-[11px] font-semibold text-slate-500">
+                        <th className="py-2.5 px-4 whitespace-nowrap">時刻</th>
+                        <th className="py-2.5 px-4 whitespace-nowrap">ページ</th>
+                        <th className="py-2.5 px-4 whitespace-nowrap">匿名ID</th>
+                        <th className="py-2.5 px-4">メッセージ</th>
+                        <th className="py-2.5 px-4 whitespace-nowrap">状態</th>
+                        <th className="py-2.5 px-4 text-right whitespace-nowrap">
+                          操作
+                        </th>
                       </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
-          )}
-        </section>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100 text-xs">
+                      {filteredHistory.map((msg) => {
+                        const isMuted = mutedTerminalIds.has(msg.terminalId);
+                        const isClearedByReset = room
+                          ? msg.epoch < room.resetEpoch
+                          : false;
+                        const isEffectivelyResolved =
+                          msg.resolved || isClearedByReset;
+                        const timeStr = new Date(
+                          msg.createdAtMs
+                        ).toLocaleTimeString('ja-JP', {
+                          hour: '2-digit',
+                          minute: '2-digit',
+                          second: '2-digit',
+                        });
+
+                        return (
+                          <tr
+                            key={msg.id}
+                            className={`hover:bg-slate-50 transition-colors ${
+                              isMuted ? 'opacity-55' : ''
+                            }`}
+                          >
+                            <td className="py-2.5 px-4 font-mono-tabular text-slate-500 whitespace-nowrap">
+                              {timeStr}
+                            </td>
+                            <td className="py-2.5 px-4 font-mono-tabular text-slate-600 whitespace-nowrap">
+                              {msg.slidePage ? `板書 p.${msg.slidePage}` : '—'}
+                            </td>
+                            <td className="py-2.5 px-4 font-medium text-slate-800 whitespace-nowrap">
+                              {msg.anonId}
+                            </td>
+                            <td className="py-2.5 px-4 text-slate-900 font-medium min-w-[200px]">
+                              {msg.text}
+                            </td>
+                            <td className="py-2.5 px-4 whitespace-nowrap">
+                              {isMuted ? (
+                                <span className="text-slate-500 font-medium">
+                                  ミュート中
+                                </span>
+                              ) : isEffectivelyResolved ? (
+                                <span className="text-emerald-600 font-medium">
+                                  対応済み
+                                </span>
+                              ) : (
+                                <span className="text-amber-600 font-semibold">
+                                  テロップ表示中
+                                </span>
+                              )}
+                            </td>
+                            <td className="py-2.5 px-4 text-right whitespace-nowrap">
+                              <div className="inline-flex items-center gap-2">
+                                {!isClearedByReset && (
+                                  <button
+                                    type="button"
+                                    onClick={() =>
+                                      void handleResolveMessage(
+                                        msg.id,
+                                        !msg.resolved
+                                      )
+                                    }
+                                    className="inline-flex items-center gap-1 px-2.5 py-1 text-[11px] font-medium text-slate-700 bg-slate-100 hover:bg-slate-200 rounded-md transition-colors cursor-pointer"
+                                  >
+                                    <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
+                                    <span>
+                                      {msg.resolved ? '未対応に戻す' : '対応済み'}
+                                    </span>
+                                  </button>
+                                )}
+
+                                {isMuted ? (
+                                  <button
+                                    type="button"
+                                    onClick={() =>
+                                      void handleUnmuteTerminal(msg.terminalId)
+                                    }
+                                    className="inline-flex items-center gap-1 px-2.5 py-1 text-[11px] font-medium text-blue-700 bg-blue-50 hover:bg-blue-100 rounded-md transition-colors cursor-pointer"
+                                  >
+                                    <Volume2 className="w-3.5 h-3.5" />
+                                    <span>解除</span>
+                                  </button>
+                                ) : (
+                                  <button
+                                    type="button"
+                                    onClick={() =>
+                                      void handleMuteTerminal(
+                                        msg.terminalId,
+                                        msg.anonId
+                                      )
+                                    }
+                                    className="inline-flex items-center gap-1 px-2.5 py-1 text-[11px] font-medium text-rose-700 bg-rose-50 hover:bg-rose-100 rounded-md transition-colors cursor-pointer"
+                                  >
+                                    <Ban className="w-3.5 h-3.5" />
+                                    <span>ミュート</span>
+                                  </button>
+                                )}
+                              </div>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </section>
+          </div>
+        )}
       </main>
     </div>
   );

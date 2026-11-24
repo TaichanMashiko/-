@@ -40,7 +40,13 @@ service cloud.firestore {
     // Entity Validation Blueprints
     function isValidRoom(data) {
       return data.keys().hasAll(['roomCode', 'teacherUid', 'chatPaused', 'resetEpoch', 'createdBy', 'createdAt', 'updatedAt'])
-        && data.keys().hasOnly(['roomCode', 'teacherUid', 'chatPaused', 'resetEpoch', 'createdBy', 'createdAt', 'updatedAt'])
+        && data.keys().hasOnly([
+          'roomCode', 'teacherUid', 'chatPaused', 'resetEpoch', 'createdBy', 'createdAt', 'updatedAt',
+          'activeDeckId', 'activeDeckTitle', 'currentPage', 'totalPages',
+          'currentTextbookPage', 'currentWorksheetPage',
+          'activeSessionId', 'lectureActive', 'lectureStartedAtMs',
+          'lastEndedDeckId', 'lastEndedPage'
+        ])
         && isValidRoomCode(data.roomCode)
         && data.teacherUid is string && data.teacherUid.size() <= 128
         && data.chatPaused is bool
@@ -52,7 +58,10 @@ service cloud.firestore {
 
     function isValidSignal(data, roomId) {
       return data.keys().hasAll(['roomId', 'ownerUid', 'roomTeacherUid', 'terminalId', 'anonId', 'status', 'epoch', 'expiresAtMs', 'createdAt', 'updatedAt'])
-        && data.keys().hasOnly(['roomId', 'ownerUid', 'roomTeacherUid', 'terminalId', 'anonId', 'status', 'epoch', 'expiresAtMs', 'createdAt', 'updatedAt'])
+        && data.keys().hasOnly([
+          'roomId', 'ownerUid', 'roomTeacherUid', 'terminalId', 'anonId', 'status', 'epoch', 'expiresAtMs', 'createdAt', 'updatedAt',
+          'deckId', 'slidePage', 'textbookPage', 'worksheetPage', 'sessionId', 'studentEmail', 'studentName'
+        ])
         && data.roomId == roomId
         && isValidRoomCode(data.roomId)
         && data.ownerUid is string && data.ownerUid.size() >= 1 && data.ownerUid.size() <= 128
@@ -68,7 +77,10 @@ service cloud.firestore {
 
     function isValidMessage(data, roomId) {
       return data.keys().hasAll(['roomId', 'ownerUid', 'roomTeacherUid', 'terminalId', 'anonId', 'text', 'kind', 'epoch', 'resolved', 'createdAt', 'updatedAt'])
-        && data.keys().hasOnly(['roomId', 'ownerUid', 'roomTeacherUid', 'terminalId', 'anonId', 'text', 'kind', 'epoch', 'resolved', 'createdAt', 'updatedAt'])
+        && data.keys().hasOnly([
+          'roomId', 'ownerUid', 'roomTeacherUid', 'terminalId', 'anonId', 'text', 'kind', 'epoch', 'resolved', 'createdAt', 'updatedAt',
+          'deckId', 'slidePage', 'textbookPage', 'worksheetPage', 'sessionId', 'studentEmail', 'studentName'
+        ])
         && data.roomId == roomId
         && isValidRoomCode(data.roomId)
         && data.ownerUid is string && data.ownerUid.size() >= 1 && data.ownerUid.size() <= 128
@@ -124,7 +136,14 @@ service cloud.firestore {
           (incoming().resetEpoch == existing().resetEpoch + 1
             && incoming().diff(existing()).affectedKeys().hasOnly(['resetEpoch', 'updatedAt'])) ||
           // Action: Teacher pauses or resumes student chat
-          (incoming().diff(existing()).affectedKeys().hasOnly(['chatPaused', 'updatedAt']))
+          (incoming().diff(existing()).affectedKeys().hasOnly(['chatPaused', 'updatedAt'])) ||
+          // Action: Teacher updates live slide deck, page, or lecture session state
+          (incoming().diff(existing()).affectedKeys().hasOnly([
+            'activeDeckId', 'activeDeckTitle', 'currentPage', 'totalPages',
+            'currentTextbookPage', 'currentWorksheetPage',
+            'activeSessionId', 'lectureActive', 'lectureStartedAtMs',
+            'lastEndedDeckId', 'lastEndedPage', 'updatedAt'
+          ]))
         );
 
       allow delete: if false;
@@ -160,7 +179,10 @@ service cloud.firestore {
           && incoming().terminalId == existing().terminalId
           && incoming().createdAt == existing().createdAt
           && incoming().updatedAt == request.time
-          && incoming().diff(existing()).affectedKeys().hasOnly(['anonId', 'status', 'epoch', 'expiresAtMs', 'updatedAt'])
+          && incoming().diff(existing()).affectedKeys().hasOnly([
+            'anonId', 'status', 'epoch', 'expiresAtMs', 'updatedAt',
+            'deckId', 'slidePage', 'textbookPage', 'worksheetPage', 'sessionId', 'studentEmail', 'studentName'
+          ])
           && exists(/databases/$(database)/documents/rooms/$(roomId))
           && incoming().epoch == get(/databases/$(database)/documents/rooms/$(roomId)).data.resetEpoch;
 
@@ -232,6 +254,53 @@ service cloud.firestore {
           && isValidId(roomId)
           && isValidId(terminalId)
           && get(/databases/$(database)/documents/rooms/$(roomId)).data.teacherUid == request.auth.uid;
+      }
+
+      // Lecture sessions & recorded lecture notes (teacher writes, verified room members read)
+      match /sessions/{sessionId} {
+        allow read: if isVerifiedUser() && isValidId(roomId);
+        allow create, update: if isVerifiedUser()
+          && isValidId(roomId)
+          && exists(/databases/$(database)/documents/rooms/$(roomId))
+          && get(/databases/$(database)/documents/rooms/$(roomId)).data.teacherUid == request.auth.uid;
+        allow delete: if isVerifiedUser()
+          && isValidId(roomId)
+          && exists(/databases/$(database)/documents/rooms/$(roomId))
+          && get(/databases/$(database)/documents/rooms/$(roomId)).data.teacherUid == request.auth.uid;
+      }
+
+      // Comments on lecture notes ("ここがわからない" / Q&A)
+      match /noteComments/{commentId} {
+        allow read: if isVerifiedUser() && isValidId(roomId);
+        allow create: if isVerifiedUser()
+          && isValidId(roomId)
+          && incoming().authorUid == request.auth.uid;
+        allow update: if isVerifiedUser()
+          && isValidId(roomId)
+          && (
+            existing().authorUid == request.auth.uid ||
+            get(/databases/$(database)/documents/rooms/$(roomId)).data.teacherUid == request.auth.uid
+          );
+        allow delete: if isVerifiedUser()
+          && isValidId(roomId)
+          && (
+            existing().authorUid == request.auth.uid ||
+            get(/databases/$(database)/documents/rooms/$(roomId)).data.teacherUid == request.auth.uid
+          );
+      }
+
+      // Student personal learning logs (student owns their logs; teacher can read room logs)
+      match /studentLogs/{logId} {
+        allow read: if isVerifiedUser()
+          && isValidId(roomId)
+          && (
+            resource.data.studentUid == request.auth.uid ||
+            get(/databases/$(database)/documents/rooms/$(roomId)).data.teacherUid == request.auth.uid
+          );
+        allow create: if isVerifiedUser()
+          && isValidId(roomId)
+          && incoming().studentUid == request.auth.uid;
+        allow update, delete: if false;
       }
     }
   }
