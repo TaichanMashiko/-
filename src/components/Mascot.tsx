@@ -2,13 +2,19 @@ import type { MascotMood } from '../types';
 
 interface MascotProps {
   mood: MascotMood;
-  size?: 'sm' | 'md' | 'lg';
+  size?: 'xs' | 'sm' | 'md' | 'lg';
   darkSurface?: boolean;
 }
 
 export function Mascot({ mood, size = 'md', darkSurface = false }: MascotProps) {
   const dimensionClass =
-    size === 'sm' ? 'w-14 h-14' : size === 'lg' ? 'w-20 h-20' : 'w-16 h-16';
+    size === 'xs'
+      ? 'w-9 h-9'
+      : size === 'sm'
+        ? 'w-12 h-12'
+        : size === 'lg'
+          ? 'w-20 h-20'
+          : 'w-16 h-16';
 
   const motionClass =
     mood === 'confused'

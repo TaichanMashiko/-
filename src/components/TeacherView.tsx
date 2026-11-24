@@ -56,6 +56,13 @@ export function TeacherView({ user, roomId, onLeave }: TeacherViewProps) {
   const [searchQuery, setSearchQuery] = useState('');
   const [copiedRoomId, setCopiedRoomId] = useState(false);
 
+  const [pipSize, setPipSize] = useState<'compact' | 'wide'>('compact');
+
+  const pipDimensions =
+    pipSize === 'compact'
+      ? { width: 600, height: 124 }
+      : { width: 840, height: 136 };
+
   const {
     pipContainer,
     isPipOpen,
@@ -64,8 +71,8 @@ export function TeacherView({ user, roomId, onLeave }: TeacherViewProps) {
     closePip,
     clearNotice,
   } = useDocumentPiP({
-    width: 960,
-    height: 140,
+    width: pipDimensions.width,
+    height: pipDimensions.height,
     title: `ClassPulse 教員テロップ (${roomId})`,
     bodyClassName: 'bg-slate-950 text-slate-100 antialiased',
   });
@@ -439,7 +446,36 @@ export function TeacherView({ user, roomId, onLeave }: TeacherViewProps) {
             </button>
           </div>
 
-          <div className="flex items-center gap-3 shrink-0">
+          <div className="flex items-center gap-2.5 shrink-0">
+            {!isPipOpen && (
+              <div
+                className="hidden sm:flex items-center gap-0.5 p-0.5 bg-slate-100 rounded-lg text-[11px]"
+                aria-label="小窓サイズ"
+              >
+                <button
+                  type="button"
+                  onClick={() => setPipSize('compact')}
+                  className={`px-2 py-1 rounded-md font-medium transition-colors cursor-pointer whitespace-nowrap ${
+                    pipSize === 'compact'
+                      ? 'bg-white text-slate-900 shadow-xs'
+                      : 'text-slate-600 hover:text-slate-900'
+                  }`}
+                >
+                  小 (600×124)
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setPipSize('wide')}
+                  className={`px-2 py-1 rounded-md font-medium transition-colors cursor-pointer whitespace-nowrap ${
+                    pipSize === 'wide'
+                      ? 'bg-white text-slate-900 shadow-xs'
+                      : 'text-slate-600 hover:text-slate-900'
+                  }`}
+                >
+                  広 (840×136)
+                </button>
+              </div>
+            )}
             <button
               type="button"
               onClick={isPipOpen ? closePip : () => void openPip()}
@@ -447,7 +483,9 @@ export function TeacherView({ user, roomId, onLeave }: TeacherViewProps) {
             >
               <PictureInPicture2 className="w-4 h-4 text-amber-400" />
               <span>
-                {isPipOpen ? 'テロップ小窓を閉じる' : '小窓モードで起動 (960×140)'}
+                {isPipOpen
+                  ? 'テロップ小窓を閉じる'
+                  : `小窓モードで起動 (${pipDimensions.width}×${pipDimensions.height})`}
               </span>
             </button>
             <button
@@ -501,7 +539,7 @@ export function TeacherView({ user, roomId, onLeave }: TeacherViewProps) {
             <div className="bg-slate-900 text-slate-100 rounded-xl px-5 py-4 flex flex-wrap items-center justify-between gap-4">
               <div className="space-y-0.5">
                 <p className="text-sm font-semibold">
-                  最前面の横長テロップ小窓（960×140px）を表示中
+                  最前面の横長テロップ小窓（{pipDimensions.width}×{pipDimensions.height}px）を表示中
                 </p>
                 <p className="text-xs text-slate-400">
                   小窓にはテロップと「わからない」人数のみを表示し、この画面でチャット履歴やミュート・送信停止を管理できます。

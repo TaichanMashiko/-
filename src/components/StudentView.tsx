@@ -65,6 +65,13 @@ export function StudentView({
 
   const signalDocId = `${user.uid}_${terminalId}`;
 
+  const [pipSize, setPipSize] = useState<'compact' | 'standard'>('compact');
+
+  const pipDimensions =
+    pipSize === 'compact'
+      ? { width: 248, height: 276 }
+      : { width: 280, height: 300 };
+
   const {
     pipContainer,
     isPipOpen,
@@ -73,8 +80,8 @@ export function StudentView({
     closePip,
     clearNotice,
   } = useDocumentPiP({
-    width: 280,
-    height: 300,
+    width: pipDimensions.width,
+    height: pipDimensions.height,
     title: `ClassPulse 生徒 (${roomId})`,
     bodyClassName: 'bg-white text-slate-900 antialiased',
   });
@@ -319,21 +326,23 @@ export function StudentView({
   const companionCard = (
     <div
       className={`${
-        isPipOpen ? 'w-full h-full' : 'w-[280px] h-[300px] border border-slate-200 rounded-2xl shadow-sm'
-      } bg-white text-slate-900 flex flex-col justify-between p-3 select-none overflow-hidden box-border`}
+        isPipOpen
+          ? 'w-full h-full p-2'
+          : 'w-[280px] h-[292px] p-3 border border-slate-200 rounded-2xl shadow-sm'
+      } bg-white text-slate-900 flex flex-col justify-between gap-1 select-none overflow-hidden box-border`}
     >
       {/* Top Meta Row */}
-      <div className="flex items-center justify-between gap-2 text-[11px] leading-none">
+      <div className="flex items-center justify-between gap-2 text-[10px] leading-none shrink-0">
         <span className="font-semibold text-slate-800 truncate">{anonId}</span>
         <span className="font-mono-tabular text-slate-500 shrink-0">{roomId}</span>
       </div>
 
       {/* Mascot & Status */}
-      <div className="flex items-center gap-2.5 py-0.5">
-        <Mascot mood={mascotMood} size="sm" />
+      <div className="flex items-center gap-2 min-h-0 shrink-0">
+        <Mascot mood={mascotMood} size={isPipOpen ? 'xs' : 'sm'} />
         <div className="min-w-0 flex-1">
           <p
-            className={`text-xs font-semibold leading-snug ${
+            className={`text-[11px] font-semibold leading-tight ${
               isConfusedActive
                 ? 'text-rose-600'
                 : isHappyActive
@@ -357,18 +366,18 @@ export function StudentView({
       </div>
 
       {/* Primary Reaction Buttons */}
-      <div className="grid grid-cols-5 gap-1.5">
+      <div className="grid grid-cols-5 gap-1.5 shrink-0">
         <button
           type="button"
           disabled={!isRoomReady}
           onClick={() => void updateSignalState('confused')}
-          className={`col-span-3 py-2.5 px-2 rounded-xl text-xs font-bold flex items-center justify-center gap-1 transition-all cursor-pointer disabled:opacity-45 disabled:cursor-not-allowed ${
+          className={`col-span-3 py-2 px-1.5 rounded-lg text-[11px] font-bold flex items-center justify-center gap-1 transition-all cursor-pointer disabled:opacity-45 disabled:cursor-not-allowed ${
             isConfusedActive
               ? 'bg-rose-600 text-white ring-2 ring-rose-300'
               : 'bg-rose-500 hover:bg-rose-600 text-white'
           }`}
         >
-          <HelpCircle className="w-4 h-4 shrink-0" />
+          <HelpCircle className="w-3.5 h-3.5 shrink-0" />
           <span className="whitespace-nowrap">わからない！</span>
         </button>
 
@@ -376,7 +385,7 @@ export function StudentView({
           type="button"
           disabled={!isRoomReady}
           onClick={() => void updateSignalState('understood')}
-          className="col-span-2 py-2.5 px-2 rounded-xl text-xs font-bold bg-emerald-600 hover:bg-emerald-700 text-white flex items-center justify-center gap-1 transition-all cursor-pointer disabled:opacity-45 disabled:cursor-not-allowed"
+          className="col-span-2 py-2 px-1.5 rounded-lg text-[11px] font-bold bg-emerald-600 hover:bg-emerald-700 text-white flex items-center justify-center gap-1 transition-all cursor-pointer disabled:opacity-45 disabled:cursor-not-allowed"
         >
           <CheckCircle2 className="w-3.5 h-3.5 shrink-0" />
           <span className="whitespace-nowrap">わかった！</span>
@@ -384,7 +393,7 @@ export function StudentView({
       </div>
 
       {/* Quick Preset Buttons */}
-      <div className="grid grid-cols-3 gap-1">
+      <div className="grid grid-cols-3 gap-1 shrink-0">
         {QUICK_PHRASES.map((phrase) => (
           <button
             key={phrase}
@@ -392,7 +401,7 @@ export function StudentView({
             disabled={!isRoomReady || Boolean(room?.chatPaused) || isCooldownActive || sending}
             onClick={() => void sendMessage(phrase, 'quick')}
             title={phrase}
-            className="py-1.5 px-1 text-[10px] font-medium leading-tight text-slate-700 bg-slate-100 hover:bg-blue-50 hover:text-blue-700 border border-slate-200 rounded-lg transition-colors cursor-pointer disabled:opacity-45 disabled:cursor-not-allowed truncate"
+            className="py-1 px-1 text-[10px] font-medium leading-tight text-slate-700 bg-slate-100 hover:bg-blue-50 hover:text-blue-700 border border-slate-200 rounded-md transition-colors cursor-pointer disabled:opacity-45 disabled:cursor-not-allowed truncate"
           >
             {phrase}
           </button>
@@ -474,7 +483,36 @@ export function StudentView({
             </span>
           </div>
 
-          <div className="flex items-center gap-3 shrink-0">
+          <div className="flex items-center gap-2.5 shrink-0">
+            {!isPipOpen && (
+              <div
+                className="hidden sm:flex items-center gap-0.5 p-0.5 bg-slate-100 rounded-lg text-[11px]"
+                aria-label="小窓サイズ"
+              >
+                <button
+                  type="button"
+                  onClick={() => setPipSize('compact')}
+                  className={`px-2 py-1 rounded-md font-medium transition-colors cursor-pointer whitespace-nowrap ${
+                    pipSize === 'compact'
+                      ? 'bg-white text-slate-900 shadow-xs'
+                      : 'text-slate-600 hover:text-slate-900'
+                  }`}
+                >
+                  極小 (248×276)
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setPipSize('standard')}
+                  className={`px-2 py-1 rounded-md font-medium transition-colors cursor-pointer whitespace-nowrap ${
+                    pipSize === 'standard'
+                      ? 'bg-white text-slate-900 shadow-xs'
+                      : 'text-slate-600 hover:text-slate-900'
+                  }`}
+                >
+                  標準 (280×300)
+                </button>
+              </div>
+            )}
             <button
               type="button"
               onClick={isPipOpen ? closePip : () => void openPip()}
@@ -525,7 +563,7 @@ export function StudentView({
             {createPortal(companionCard, pipContainer)}
             <div className="max-w-sm w-full bg-white border border-slate-200 rounded-xl p-6 text-center space-y-3">
               <p className="text-sm font-semibold text-slate-900">
-                最前面の小窓（280×300px）を起動中です
+                最前面の小窓（{pipDimensions.width}×{pipDimensions.height}px）を起動中です
               </p>
               <p className="text-xs text-slate-600 leading-relaxed">
                 別ウィンドウで操作できます。このタブを閉じると小窓も終了します。
@@ -543,7 +581,7 @@ export function StudentView({
           <div className="flex flex-col items-center gap-3">
             {companionCard}
             <p className="text-xs text-slate-500">
-              あなたの匿名ID: {anonId} · 小窓サイズ目安 280 × 300px
+              あなたの匿名ID: {anonId} · 小窓サイズ選択中 {pipDimensions.width} × {pipDimensions.height}px
             </p>
           </div>
         )}

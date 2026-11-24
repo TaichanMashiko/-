@@ -53,6 +53,9 @@ function copyStylesToPipWindow(pipWindow: Window, bodyClassName: string) {
   });
 
   pipWindow.document.documentElement.lang = 'ja';
+  pipWindow.document.documentElement.style.height = '100%';
+  pipWindow.document.documentElement.style.margin = '0';
+  pipWindow.document.body.style.height = '100%';
   pipWindow.document.body.style.margin = '0';
   pipWindow.document.body.style.padding = '0';
   pipWindow.document.body.style.overflow = 'hidden';
@@ -110,7 +113,7 @@ export function useDocumentPiP({
       const container = pipWin.document.createElement('div');
       container.id = 'pip-root';
       container.style.width = '100%';
-      container.style.height = '100vh';
+      container.style.height = '100%';
       pipWin.document.body.appendChild(container);
 
       pipWindowRef.current = pipWin;
