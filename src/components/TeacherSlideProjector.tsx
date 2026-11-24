@@ -806,7 +806,7 @@ export function TeacherSlideProjector({
         ref={projectorRef}
         className={`${
           isFullscreen
-            ? 'fixed inset-0 z-50 bg-slate-950 p-3 flex flex-col justify-between gap-2'
+            ? 'fixed inset-0 z-50 h-screen w-screen overflow-hidden bg-slate-950 p-2.5 flex flex-col gap-2'
             : 'relative'
         }`}
       >
@@ -830,14 +830,14 @@ export function TeacherSlideProjector({
           url={pdfUrlToDisplay}
           page={currentPage}
           onPageCountLoaded={handleCustomPageCountLoaded}
-          enableAnnotations
+          fitToContainer={isFullscreen}
           darkBackdrop={isFullscreen}
-          maxHeightClass={isFullscreen ? 'flex-1 max-h-[76vh]' : 'max-h-[68vh]'}
+          maxHeightClass="max-h-[68vh]"
         />
 
         {/* Slide Navigation Bar */}
         <div
-          className={`mt-2 flex flex-wrap items-center justify-between gap-3 px-4 py-2.5 rounded-xl border ${
+          className={`${isFullscreen ? 'shrink-0' : 'mt-2'} flex flex-wrap items-center justify-between gap-3 px-4 py-2 rounded-xl border ${
             isFullscreen
               ? 'bg-slate-900 border-slate-800 text-slate-100'
               : 'bg-white border-slate-200 text-slate-900'
