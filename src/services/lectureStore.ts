@@ -1,5 +1,6 @@
 import {
   collection,
+  deleteDoc,
   doc,
   onSnapshot,
   orderBy,
@@ -99,6 +100,27 @@ export async function persistLectureSession(
       ...session,
       updatedAt: serverTimestamp(),
     });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+export async function deleteLectureSession(
+  roomId: string,
+  sessionId: string
+): Promise<boolean> {
+  const remaining = loadLocalSessions(roomId).filter((s) => s.id !== sessionId);
+  try {
+    localStorage.setItem(
+      `${SESSIONS_LS_PREFIX}${roomId}`,
+      JSON.stringify(remaining)
+    );
+  } catch {
+    // ignore
+  }
+  try {
+    await deleteDoc(doc(db, 'rooms', roomId, 'sessions', sessionId));
     return true;
   } catch {
     return false;

@@ -42,12 +42,18 @@ import type {
   SignalData,
 } from '../types';
 import { PdfPageViewer } from './PdfPageViewer';
+import { TeacherTickerBar } from './TeacherTickerBar';
 
 interface TeacherSlideProjectorProps {
   roomId: string;
   teacherUid: string;
   room: RoomData | null;
   confusedCount: number;
+  activeTickerMessages: MessageData[];
+  nowMs: number;
+  isResetting: boolean;
+  onResetAll: () => void;
+  onResolveMessage: (messageId: string) => void;
   signals: SignalData[];
   messages: MessageData[];
   sessions: LectureSession[];
@@ -60,6 +66,11 @@ export function TeacherSlideProjector({
   teacherUid,
   room,
   confusedCount,
+  activeTickerMessages,
+  nowMs,
+  isResetting,
+  onResetAll,
+  onResolveMessage,
   signals,
   messages,
   sessions,
@@ -440,6 +451,24 @@ export function TeacherSlideProjector({
     showToast(`ローカルPDF「${file.name}」を読み込みました`);
   };
 
+  // Keep isFullscreen synced when user exits fullscreen via browser Esc key
+  useEffect(() => {
+    const handleFsChange = () => {
+      if (!document.fullscreenElement) {
+        setIsFullscreen(false);
+      }
+    };
+    document.addEventListener('fullscreenchange', handleFsChange);
+    return () => document.removeEventListener('fullscreenchange', handleFsChange);
+  }, []);
+
+  const handleCustomPageCountLoaded = useCallback(
+    (n: number) => {
+      if (customPdfUrl) setCustomPageCount(n);
+    },
+    [customPdfUrl]
+  );
+
   const toggleFullscreen = () => {
     if (!isFullscreen) {
       setIsFullscreen(true);
@@ -777,19 +806,33 @@ export function TeacherSlideProjector({
         ref={projectorRef}
         className={`${
           isFullscreen
-            ? 'fixed inset-0 z-50 bg-slate-950 p-4 flex flex-col justify-between'
+            ? 'fixed inset-0 z-50 bg-slate-950 p-3 flex flex-col justify-between gap-2'
             : 'relative'
         }`}
       >
+        {/* Live Student Comments & Confused Bar inside Fullscreen Projector */}
+        {isFullscreen && (
+          <div className="shrink-0">
+            <TeacherTickerBar
+              roomId={roomId}
+              confusedCount={confusedCount}
+              activeMessages={activeTickerMessages}
+              chatPaused={Boolean(room?.chatPaused)}
+              nowMs={nowMs}
+              isResetting={isResetting}
+              onResetAll={onResetAll}
+              onResolveMessage={onResolveMessage}
+            />
+          </div>
+        )}
+
         <PdfPageViewer
           url={pdfUrlToDisplay}
           page={currentPage}
-          onPageCountLoaded={(n) => {
-            if (customPdfUrl) setCustomPageCount(n);
-          }}
+          onPageCountLoaded={handleCustomPageCountLoaded}
           enableAnnotations
           darkBackdrop={isFullscreen}
-          maxHeightClass={isFullscreen ? 'flex-1 max-h-[84vh]' : 'max-h-[68vh]'}
+          maxHeightClass={isFullscreen ? 'flex-1 max-h-[76vh]' : 'max-h-[68vh]'}
         />
 
         {/* Slide Navigation Bar */}

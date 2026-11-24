@@ -34,6 +34,8 @@ export function PdfPageViewer({
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [docReadyUrl, setDocReadyUrl] = useState<string | null>(null);
+  const onPageCountLoadedRef = useRef(onPageCountLoaded);
+  onPageCountLoadedRef.current = onPageCountLoaded;
 
   // Annotation state (per-page stored in memory)
   const [drawTool, setDrawTool] = useState<DrawTool>('none');
@@ -41,7 +43,7 @@ export function PdfPageViewer({
   const isDrawingRef = useRef(false);
   const pageAnnotationsRef = useRef<Map<string, string>>(new Map());
 
-  // Load PDF document when url changes
+  // Load PDF document ONLY when url changes
   useEffect(() => {
     let cancelled = false;
     setError(null);
@@ -67,7 +69,7 @@ export function PdfPageViewer({
         }
         pdfDocRef.current = pdf;
         setDocReadyUrl(url);
-        onPageCountLoaded?.(pdf.numPages);
+        onPageCountLoadedRef.current?.(pdf.numPages);
       })
       .catch((err) => {
         if (!cancelled) {
@@ -84,7 +86,7 @@ export function PdfPageViewer({
       cancelled = true;
       void loadingTask.destroy();
     };
-  }, [url, onPageCountLoaded]);
+  }, [url]);
 
   // Render current page onto canvas
   useEffect(() => {
@@ -338,10 +340,10 @@ export function PdfPageViewer({
         </div>
 
         {loading && (
-          <div className="absolute inset-0 flex items-center justify-center bg-slate-950/35 backdrop-blur-[1px]">
-            <div className="flex items-center gap-2 px-3.5 py-2 rounded-lg bg-white/95 text-slate-800 text-xs font-medium shadow-md">
-              <Loader2 className="w-4 h-4 animate-spin text-blue-600" />
-              <span>ページを描画中...</span>
+          <div className="absolute top-3 right-3 pointer-events-none">
+            <div className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-slate-900/80 text-white text-[11px] font-medium shadow-md">
+              <Loader2 className="w-3.5 h-3.5 animate-spin text-blue-400" />
+              <span>読込中...</span>
             </div>
           </div>
         )}

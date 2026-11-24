@@ -8,9 +8,11 @@ import {
   MessageSquare,
   Send,
   Sparkles,
+  Trash2,
   Users,
 } from 'lucide-react';
 import {
+  deleteLectureSession,
   persistNoteComment,
   toggleNoteCommentResolved,
 } from '../services/lectureStore';
@@ -29,6 +31,7 @@ interface TeacherReviewDashboardProps {
   comments: NoteComment[];
   studentLogs: StudentLearningLog[];
   initialSessionId?: string;
+  onSessionDeleted?: (sessionId: string) => void;
 }
 
 export function TeacherReviewDashboard({
@@ -39,12 +42,32 @@ export function TeacherReviewDashboard({
   comments,
   studentLogs,
   initialSessionId,
+  onSessionDeleted,
 }: TeacherReviewDashboardProps) {
   const [selectedSessionId, setSelectedSessionId] = useState<string>(
     () => initialSessionId || sessions[0]?.id || ''
   );
   const [replyTargetKey, setReplyTargetKey] = useState<string | null>(null);
   const [replyText, setReplyText] = useState('');
+  const [deletingId, setDeletingId] = useState<string | null>(null);
+
+  const handleDeleteSession = async (session: LectureSession) => {
+    const ok = window.confirm(
+      `講義記録「${session.deckTitle}（p.${session.startPage}〜p.${session.endPage}）」を削除してもよろしいですか？`
+    );
+    if (!ok) return;
+    setDeletingId(session.id);
+    try {
+      await deleteLectureSession(roomId, session.id);
+      onSessionDeleted?.(session.id);
+      if (selectedSessionId === session.id) {
+        const next = sessions.find((s) => s.id !== session.id);
+        setSelectedSessionId(next?.id ?? '');
+      }
+    } finally {
+      setDeletingId(null);
+    }
+  };
 
   const activeSession = useMemo(
     () =>
@@ -296,16 +319,27 @@ export function TeacherReviewDashboard({
                   </div>
                 </div>
 
-                {deck?.worksheetAnswerPdfUrl && (
-                  <a
-                    href={deck.worksheetAnswerPdfUrl}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="px-3 py-1.5 text-xs font-semibold text-emerald-700 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 rounded-lg"
+                <div className="flex items-center gap-2 shrink-0">
+                  {deck?.worksheetAnswerPdfUrl && (
+                    <a
+                      href={deck.worksheetAnswerPdfUrl}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="px-3 py-1.5 text-xs font-semibold text-emerald-700 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 rounded-lg"
+                    >
+                      対応ワーク解答PDFを開く
+                    </a>
+                  )}
+                  <button
+                    type="button"
+                    disabled={deletingId === activeSession.id}
+                    onClick={() => void handleDeleteSession(activeSession)}
+                    className="inline-flex items-center gap-1 px-3 py-1.5 text-xs font-semibold text-rose-700 bg-rose-50 hover:bg-rose-100 border border-rose-200 rounded-lg disabled:opacity-50 cursor-pointer"
                   >
-                    対応ワーク解答PDFを開く
-                  </a>
-                )}
+                    <Trash2 className="w-3.5 h-3.5" />
+                    <span>この記録を削除</span>
+                  </button>
+                </div>
               </div>
 
               <p className="text-sm text-slate-700 leading-relaxed bg-slate-50 border border-slate-200 rounded-lg p-3.5">

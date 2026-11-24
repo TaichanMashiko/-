@@ -716,6 +716,11 @@ export function TeacherView({ user, roomId, onLeave }: TeacherViewProps) {
             teacherUid={user.uid}
             room={room}
             confusedCount={confusedCount}
+            activeTickerMessages={activeTickerMessages}
+            nowMs={nowMs}
+            isResetting={isResetting}
+            onResetAll={() => void handleResetAll()}
+            onResolveMessage={(id) => void handleResolveMessage(id, true)}
             signals={signals}
             messages={messages}
             sessions={sessions}
@@ -742,6 +747,9 @@ export function TeacherView({ user, roomId, onLeave }: TeacherViewProps) {
             comments={noteComments}
             studentLogs={studentLogs}
             initialSessionId={reviewSessionId}
+            onSessionDeleted={(deletedId) => {
+              setSessions((prev) => prev.filter((s) => s.id !== deletedId));
+            }}
           />
         )}
 
