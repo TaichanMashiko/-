@@ -1,0 +1,274 @@
+{
+  "entities": {
+    "Room": {
+      "title": "Classroom Room",
+      "description": "Shared real-time classroom session keyed by room code.",
+      "type": "object",
+      "properties": {
+        "roomCode": {
+          "type": "string",
+          "description": "Normalized room identifier.",
+          "minLength": 1,
+          "maxLength": 64,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "teacherUid": {
+          "type": "string",
+          "description": "Firebase Auth UID of the teacher managing the room, or empty string if unclaimed.",
+          "maxLength": 128
+        },
+        "chatPaused": {
+          "type": "boolean",
+          "description": "Whether student quick phrases and chat messages are temporarily paused by the teacher."
+        },
+        "resetEpoch": {
+          "type": "integer",
+          "description": "Monotonically increasing counter incremented when the teacher resets confusion signals and ticker."
+        },
+        "createdBy": {
+          "type": "string",
+          "description": "Firebase Auth UID of the user who created the room.",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp when the room was created."
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp when the room was last updated."
+        }
+      },
+      "required": [
+        "roomCode",
+        "teacherUid",
+        "chatPaused",
+        "resetEpoch",
+        "createdBy",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "ConfusionSignal": {
+      "title": "Student Confusion Signal",
+      "description": "Real-time understanding status of a student terminal within a room.",
+      "type": "object",
+      "properties": {
+        "roomId": {
+          "type": "string",
+          "description": "Parent classroom room ID.",
+          "minLength": 1,
+          "maxLength": 64,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "ownerUid": {
+          "type": "string",
+          "description": "Firebase Auth UID of the student terminal.",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "roomTeacherUid": {
+          "type": "string",
+          "description": "Teacher UID copied from the parent room for query authorization.",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "terminalId": {
+          "type": "string",
+          "description": "Unique anonymous terminal identifier.",
+          "minLength": 1,
+          "maxLength": 64,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "anonId": {
+          "type": "string",
+          "description": "Anonymous animal persona name displayed in the classroom.",
+          "minLength": 1,
+          "maxLength": 48
+        },
+        "status": {
+          "type": "string",
+          "enum": ["confused", "understood"],
+          "description": "Current understanding state of the student."
+        },
+        "epoch": {
+          "type": "integer",
+          "description": "Room resetEpoch when this signal was emitted."
+        },
+        "expiresAtMs": {
+          "type": "integer",
+          "description": "Epoch milliseconds timestamp when the 45-second confused state auto-expires (0 when understood)."
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp when this terminal signal record was created."
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp when this signal was last updated."
+        }
+      },
+      "required": [
+        "roomId",
+        "ownerUid",
+        "roomTeacherUid",
+        "terminalId",
+        "anonId",
+        "status",
+        "epoch",
+        "expiresAtMs",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "ChatMessage": {
+      "title": "Anonymous Classroom Message",
+      "description": "Quick phrase or short anonymous question sent by a student.",
+      "type": "object",
+      "properties": {
+        "roomId": {
+          "type": "string",
+          "description": "Parent classroom room ID.",
+          "minLength": 1,
+          "maxLength": 64,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "ownerUid": {
+          "type": "string",
+          "description": "Firebase Auth UID of the sender.",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "roomTeacherUid": {
+          "type": "string",
+          "description": "Teacher UID copied from the parent room for query authorization.",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "terminalId": {
+          "type": "string",
+          "description": "Unique anonymous terminal identifier.",
+          "minLength": 1,
+          "maxLength": 64,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "anonId": {
+          "type": "string",
+          "description": "Anonymous animal persona name.",
+          "minLength": 1,
+          "maxLength": 48
+        },
+        "text": {
+          "type": "string",
+          "description": "Message or quick phrase content.",
+          "minLength": 1,
+          "maxLength": 140
+        },
+        "kind": {
+          "type": "string",
+          "enum": ["quick", "chat"],
+          "description": "Whether the message came from a quick preset button or free-text input."
+        },
+        "epoch": {
+          "type": "integer",
+          "description": "Room resetEpoch when the message was sent."
+        },
+        "resolved": {
+          "type": "boolean",
+          "description": "Whether the teacher marked this message as addressed/resolved."
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp when the message was sent."
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp when the message was last updated."
+        }
+      },
+      "required": [
+        "roomId",
+        "ownerUid",
+        "roomTeacherUid",
+        "terminalId",
+        "anonId",
+        "text",
+        "kind",
+        "epoch",
+        "resolved",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "MutedTerminal": {
+      "title": "Muted Anonymous Terminal",
+      "description": "Terminal muted by the teacher in a specific room.",
+      "type": "object",
+      "properties": {
+        "roomId": {
+          "type": "string",
+          "description": "Parent classroom room ID.",
+          "minLength": 1,
+          "maxLength": 64,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "teacherUid": {
+          "type": "string",
+          "description": "Teacher UID who muted this terminal.",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "terminalId": {
+          "type": "string",
+          "description": "Muted anonymous terminal ID.",
+          "minLength": 1,
+          "maxLength": 64,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "anonId": {
+          "type": "string",
+          "description": "Display anonymous animal name at the time of muting.",
+          "minLength": 1,
+          "maxLength": 48
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp when the mute was created."
+        }
+      },
+      "required": [
+        "roomId",
+        "teacherUid",
+        "terminalId",
+        "anonId",
+        "createdAt"
+      ]
+    }
+  },
+  "firestore": {
+    "/rooms/{roomId}": {
+      "schema": { "$ref": "#/entities/Room" },
+      "description": "Classroom room configuration and live teacher control state."
+    },
+    "/rooms/{roomId}/signals/{signalId}": {
+      "schema": { "$ref": "#/entities/ConfusionSignal" },
+      "description": "Real-time student understanding signals."
+    },
+    "/rooms/{roomId}/messages/{messageId}": {
+      "schema": { "$ref": "#/entities/ChatMessage" },
+      "description": "Anonymous student chat messages and quick preset reactions."
+    },
+    "/rooms/{roomId}/mutes/{terminalId}": {
+      "schema": { "$ref": "#/entities/MutedTerminal" },
+      "description": "Terminals muted by the room teacher."
+    }
+  }
+}

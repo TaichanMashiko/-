@@ -1,0 +1,8 @@
+{
+  "name": "ClassPulse — 授業リアルタイムコンパニオン",
+  "description": "授業中に生徒と先生がリアルタイムに「わからない」や匿名質問を共有できる、Document Picture-in-Picture対応デスクトップコンパニオンアプリ。",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
