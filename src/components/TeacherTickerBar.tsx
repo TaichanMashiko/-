@@ -52,7 +52,7 @@ export function TeacherTickerBar({
   const mascotMood: MascotMood =
     level === 'high' ? 'alert' : level === 'medium' ? 'confused' : 'idle';
 
-  const durationSeconds = Math.max(16, activeMessages.length * 7);
+  const durationSeconds = Math.max(10, activeMessages.length * 5 + 6);
 
   return (
     <div
@@ -64,15 +64,15 @@ export function TeacherTickerBar({
     >
       {/* Left Fixed Area: Mascot + Confusion Gauge + Reset Button */}
       <div
-        className={`shrink-0 border-r border-slate-800 flex items-center justify-between gap-2.5 bg-slate-950 ${
-          inPipWindow ? 'w-[255px] px-2.5 py-1' : 'w-[300px] sm:w-[320px] px-3.5 py-2'
+        className={`shrink-0 border-r border-slate-800 flex items-center justify-between gap-2 bg-slate-950 ${
+          inPipWindow ? 'w-[266px] px-2.5 py-1' : 'w-[300px] sm:w-[320px] px-3.5 py-2'
         }`}
       >
         <div className="flex items-center gap-2 min-w-0">
           <Mascot mood={mascotMood} size="xs" darkSurface />
           <div className="min-w-0 space-y-1">
-            <div className="flex items-baseline gap-1 leading-none">
-              <span className="text-[10px] text-slate-400 whitespace-nowrap">
+            <div className="flex items-baseline gap-1 leading-none whitespace-nowrap">
+              <span className="text-[10px] text-slate-400">
                 わからない
               </span>
               <span
@@ -81,7 +81,7 @@ export function TeacherTickerBar({
                 {confusedCount}
               </span>
               <span className="text-[11px] text-slate-400">人</span>
-              <span className={`text-[10px] font-semibold ml-0.5 ${levelColorText}`}>
+              <span className={`text-[10px] font-semibold ml-0.5 whitespace-nowrap ${levelColorText}`}>
                 {levelLabel}
               </span>
             </div>
@@ -157,47 +157,41 @@ export function TeacherTickerBar({
             </div>
           ) : (
             <div className="flex-1 min-w-0 overflow-hidden h-full flex items-center">
-              <div
-                className="ticker-track items-center gap-3 px-3"
-                style={
-                  {
-                    '--ticker-duration': `${durationSeconds}s`,
-                  } as React.CSSProperties
-                }
-              >
-                {[0, 1].map((dupIndex) => (
-                  <div
-                    key={dupIndex}
-                    className="flex items-center gap-3 shrink-0"
-                    aria-hidden={dupIndex === 1}
-                  >
-                    {activeMessages.map((msg) => {
-                      const isNew = nowMs - msg.createdAtMs < NEW_MESSAGE_HIGHLIGHT_MS;
-                      return (
-                        <button
-                          key={`${dupIndex}-${msg.id}`}
-                          type="button"
-                          onClick={() => onResolveMessage(msg.id)}
-                          title="クリックして対応済みにする"
-                          className={`group inline-flex items-center gap-2 px-2.5 py-1 rounded-md border text-xs font-medium transition-colors cursor-pointer whitespace-nowrap shrink-0 ${
-                            isNew
-                              ? 'bg-amber-500/20 border-amber-400/70 text-amber-100 hover:bg-amber-500/30'
-                              : 'bg-slate-800/90 border-slate-700 text-slate-100 hover:bg-slate-700'
-                          }`}
-                        >
-                          {isNew && (
-                            <span className="text-[10px] font-bold tracking-wider text-amber-300">
-                              NEW
-                            </span>
-                          )}
-                          <span className="text-slate-300 text-[11px]">{msg.anonId}:</span>
-                          <span className="font-semibold">{msg.text}</span>
-                          <CheckCircle2 className="w-3 h-3 text-slate-400 group-hover:text-emerald-400 transition-colors shrink-0" />
-                        </button>
-                      );
-                    })}
-                  </div>
-                ))}
+              <div className="w-full overflow-hidden">
+                <div
+                  className="ticker-track items-center gap-4"
+                  style={
+                    {
+                      '--ticker-duration': `${durationSeconds}s`,
+                    } as React.CSSProperties
+                  }
+                >
+                  {activeMessages.map((msg) => {
+                    const isNew = nowMs - msg.createdAtMs < NEW_MESSAGE_HIGHLIGHT_MS;
+                    return (
+                      <button
+                        key={msg.id}
+                        type="button"
+                        onClick={() => onResolveMessage(msg.id)}
+                        title="クリックして対応済みにする"
+                        className={`group inline-flex items-center gap-2 px-2.5 py-1 rounded-md border text-xs font-medium transition-colors cursor-pointer whitespace-nowrap shrink-0 ${
+                          isNew
+                            ? 'bg-amber-500/20 border-amber-400/70 text-amber-100 hover:bg-amber-500/30'
+                            : 'bg-slate-800/90 border-slate-700 text-slate-100 hover:bg-slate-700'
+                        }`}
+                      >
+                        {isNew && (
+                          <span className="text-[10px] font-bold tracking-wider text-amber-300">
+                            NEW
+                          </span>
+                        )}
+                        <span className="text-slate-300 text-[11px]">{msg.anonId}:</span>
+                        <span className="font-semibold">{msg.text}</span>
+                        <CheckCircle2 className="w-3 h-3 text-slate-400 group-hover:text-emerald-400 transition-colors shrink-0" />
+                      </button>
+                    );
+                  })}
+                </div>
               </div>
             </div>
           )}
