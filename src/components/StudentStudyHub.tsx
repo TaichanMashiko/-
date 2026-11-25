@@ -6,6 +6,8 @@ import {
   CheckCircle2,
   ChevronLeft,
   ChevronRight,
+  ClipboardCheck,
+  Compass,
   FileText,
   HelpCircle,
   Lightbulb,
@@ -13,17 +15,23 @@ import {
   RefreshCw,
   Send,
   Sparkles,
+  Target,
   Trophy,
 } from 'lucide-react';
 import {
   generateAdaptiveProblems,
   generateCommentHint,
+  generateSimilarProblemsForPage,
 } from '../services/aiTutorService';
 import {
   persistNoteComment,
   persistStudentLog,
 } from '../services/lectureStore';
-import { getDeckById, getMainDecks } from '../services/materialsService';
+import {
+  getDeckById,
+  getMainDecks,
+  getTestsForChapter,
+} from '../services/materialsService';
 import type {
   AdaptiveProblem,
   LectureSession,
@@ -32,6 +40,7 @@ import type {
   StudentLearningLog,
 } from '../types';
 import { PdfPageViewer } from './PdfPageViewer';
+import { PrerequisiteFollowUpCard } from './PrerequisiteFollowUpCard';
 
 interface StudentStudyHubProps {
   user: User;
@@ -43,6 +52,13 @@ interface StudentStudyHubProps {
   myLogs: StudentLearningLog[];
   initialTab?: 'worksheet' | 'practice';
 }
+
+type MaterialViewMode =
+  | 'question'
+  | 'answer'
+  | 'detail'
+  | 'test10min'
+  | 'evaltest';
 
 export function StudentStudyHub({
   user,
@@ -57,7 +73,7 @@ export function StudentStudyHub({
   const mainDecks = useMemo(() => getMainDecks(), []);
   const [subTab, setSubTab] = useState<'worksheet' | 'practice'>(initialTab);
 
-  // Worksheet & Linked Notes state
+  // Worksheet, Tests & Linked Notes state
   const [selectedDeckId, setSelectedDeckId] = useState<string>(
     () =>
       room?.activeDeckId ||
@@ -65,14 +81,20 @@ export function StudentStudyHub({
       mainDecks[0]?.id ||
       'm1-ch1-s1'
   );
-  const [pdfMode, setPdfMode] = useState<'question' | 'answer' | 'detail'>(
-    'question'
-  );
+  const [pdfMode, setPdfMode] = useState<MaterialViewMode>('question');
   const [wsPage, setWsPage] = useState<number>(
     () => room?.currentWorksheetPage || 1
   );
   const [pdfPageCount, setPdfPageCount] = useState<number>(1);
   const [showAllSegments, setShowAllSegments] = useState(false);
+
+  // Selected 10-min test / evaluation test state
+  const [selectedTestId, setSelectedTestId] = useState<string>('');
+  const [showTestAnswer, setShowTestAnswer] = useState<boolean>(false);
+
+  // Prerequisite follow-up toggle
+  const [showPrereqDrawer, setShowPrereqDrawer] = useState<boolean>(false);
+  const [prereqTopicHint, setPrereqTopicHint] = useState<string>('');
 
   // Comment on lecture note state
   const [commentTargetPage, setCommentTargetPage] = useState<number | null>(
@@ -89,6 +111,7 @@ export function StudentStudyHub({
     'basic' | 'standard' | 'challenge'
   >('basic');
   const [problems, setProblems] = useState<AdaptiveProblem[]>([]);
+  const [practiceHeader, setPracticeHeader] = useState<string>('');
   const [generatingProblems, setGeneratingProblems] = useState(false);
   const [selectedAnswers, setSelectedAnswers] = useState<
     Record<string, string>
@@ -102,6 +125,25 @@ export function StudentStudyHub({
     () => getDeckById(selectedDeckId) ?? mainDecks[0] ?? null,
     [mainDecks, selectedDeckId]
   );
+
+  const chapterTests = useMemo(
+    () => getTestsForChapter(activeDeck?.chapter ?? 1),
+    [activeDeck?.chapter]
+  );
+
+  const activeTestList =
+    pdfMode === 'test10min'
+      ? chapterTests.tests10min
+      : pdfMode === 'evaltest'
+        ? chapterTests.evalTests
+        : [];
+
+  const activeTestItem = useMemo(() => {
+    if (activeTestList.length === 0) return null;
+    return (
+      activeTestList.find((t) => t.id === selectedTestId) ?? activeTestList[0]
+    );
+  }, [activeTestList, selectedTestId]);
 
   // Sessions matching this unit/deck
   const unitSessions = useMemo(() => {
@@ -124,12 +166,29 @@ export function StudentStudyHub({
     return matched.length > 0 ? matched : activeSession.segments;
   }, [activeSession, showAllSegments, wsPage]);
 
+  const currentTopicForPage = useMemo(() => {
+    if (activeTestItem && (pdfMode === 'test10min' || pdfMode === 'evaltest')) {
+      return activeTestItem.topic;
+    }
+    if (linkedSegments[0]?.topic) return linkedSegments[0].topic;
+    const matchSlide = activeDeck?.slides.find(
+      (s) => s.worksheetPage === wsPage
+    );
+    return matchSlide?.topic ?? activeDeck?.title ?? '数学Ⅰ';
+  }, [activeDeck, activeTestItem, linkedSegments, pdfMode, wsPage]);
+
   const currentPdfUrl = useMemo(() => {
     if (!activeDeck) return null;
     if (pdfMode === 'question') return activeDeck.worksheetQuestionPdfUrl || null;
     if (pdfMode === 'answer') return activeDeck.worksheetAnswerPdfUrl || null;
-    return activeDeck.detailedAnswerPdfUrl || null;
-  }, [activeDeck, pdfMode]);
+    if (pdfMode === 'detail') return activeDeck.detailedAnswerPdfUrl || null;
+    if ((pdfMode === 'test10min' || pdfMode === 'evaltest') && activeTestItem) {
+      return showTestAnswer
+        ? activeTestItem.answerUrl || activeTestItem.questionUrl
+        : activeTestItem.questionUrl;
+    }
+    return null;
+  }, [activeDeck, activeTestItem, pdfMode, showTestAnswer]);
 
   // Weak spot analysis from personal logs
   const weakLogs = useMemo(
@@ -165,13 +224,19 @@ export function StudentStudyHub({
     topic: string,
     transcript: string
   ) => {
-    if (!activeSession || !activeDeck || !commentText.trim() || submittingComment)
+    if (
+      !activeSession ||
+      !activeDeck ||
+      !commentText.trim() ||
+      submittingComment
+    )
       return;
     setSubmittingComment(true);
     try {
       const text = commentText.trim();
       const aiHint = await generateCommentHint({
         deckTitle: activeDeck.title,
+        chapter: activeDeck.chapter,
         topic,
         textbookPage,
         worksheetPage,
@@ -218,6 +283,8 @@ export function StudentStudyHub({
 
       setCommentText('');
       setCommentTargetPage(null);
+      setPrereqTopicHint(topic);
+      setShowPrereqDrawer(true);
     } finally {
       setSubmittingComment(false);
     }
@@ -233,6 +300,42 @@ export function StudentStudyHub({
         difficulty,
       });
       setProblems(next);
+      setPracticeHeader(
+        weakLogs.length > 0
+          ? `あなたの苦手履歴に合わせた問題（第${next[0]?.chapter ?? 1}章）`
+          : `${activeDeck?.title ?? '数学Ⅰ'} の確認問題`
+      );
+      setSelectedAnswers({});
+      setRevealedHints({});
+      setGradedIds({});
+    } finally {
+      setGeneratingProblems(false);
+    }
+  };
+
+  const handlePracticeSimilarForCurrentPage = async (
+    topicOverride?: string,
+    tbPageOverride?: number | null
+  ) => {
+    if (!activeDeck) return;
+    const topic = topicOverride || currentTopicForPage;
+    setSubTab('practice');
+    setPrereqTopicHint(topic);
+    setGeneratingProblems(true);
+    try {
+      const next = await generateSimilarProblemsForPage({
+        chapter: activeDeck.chapter,
+        deckId: activeDeck.id,
+        deckTitle: activeDeck.title,
+        topic,
+        textbookPage: tbPageOverride ?? null,
+        worksheetPage: wsPage,
+        difficulty,
+      });
+      setProblems(next);
+      setPracticeHeader(
+        `「${topic}」（ワーク p.${wsPage}）の類題トレーニング`
+      );
       setSelectedAnswers({});
       setRevealedHints({});
       setGradedIds({});
@@ -280,7 +383,7 @@ export function StudentStudyHub({
             }`}
           >
             <FileText className="w-3.5 h-3.5 text-emerald-600" />
-            <span>ワークシート＆講義記録</span>
+            <span>ワーク・テスト＆講義記録</span>
           </button>
           <button
             type="button"
@@ -292,7 +395,7 @@ export function StudentStudyHub({
             }`}
           >
             <Brain className="w-3.5 h-3.5 text-indigo-600" />
-            <span>AI個別最適演習</span>
+            <span>AI類題＆前提フォロー</span>
             {weakLogs.length > 0 && (
               <span className="px-1.5 py-0.5 text-[10px] font-bold bg-rose-100 text-rose-700 rounded-full">
                 苦手 {weakLogs.length}
@@ -307,6 +410,7 @@ export function StudentStudyHub({
             onChange={(e) => {
               setSelectedDeckId(e.target.value);
               setWsPage(1);
+              setSelectedTestId('');
             }}
             className="px-3 py-1.5 text-xs font-medium bg-slate-50 border border-slate-300 rounded-lg text-slate-900"
           >
@@ -321,10 +425,10 @@ export function StudentStudyHub({
 
       {subTab === 'worksheet' ? (
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-5">
-          {/* Left: Worksheet & Answer PDF Viewer */}
+          {/* Left: Worksheet, 10-Min Test & Eval Test PDF Viewer */}
           <div className="lg:col-span-7 bg-white border border-slate-200 rounded-xl p-4 space-y-3">
             <div className="flex flex-wrap items-center justify-between gap-2">
-              <div className="flex items-center gap-1 bg-slate-100 p-1 rounded-lg text-xs">
+              <div className="flex flex-wrap items-center gap-1 bg-slate-100 p-1 rounded-lg text-xs">
                 <button
                   type="button"
                   onClick={() => {
@@ -337,7 +441,7 @@ export function StudentStudyHub({
                       : 'text-slate-600'
                   }`}
                 >
-                  ワークシート問題
+                  ワーク問題
                 </button>
                 <button
                   type="button"
@@ -351,7 +455,7 @@ export function StudentStudyHub({
                       : 'text-slate-600'
                   }`}
                 >
-                  ワーク解答付PDF
+                  ワーク解答
                 </button>
                 <button
                   type="button"
@@ -365,7 +469,37 @@ export function StudentStudyHub({
                       : 'text-slate-600'
                   }`}
                 >
-                  教科書 詳細解答
+                  詳細解答
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setPdfMode('test10min');
+                    setShowTestAnswer(false);
+                    setWsPage(1);
+                  }}
+                  className={`px-2.5 py-1 rounded-md font-semibold cursor-pointer ${
+                    pdfMode === 'test10min'
+                      ? 'bg-indigo-600 text-white shadow-xs'
+                      : 'text-slate-600'
+                  }`}
+                >
+                  10分間テスト
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setPdfMode('evaltest');
+                    setShowTestAnswer(false);
+                    setWsPage(1);
+                  }}
+                  className={`px-2.5 py-1 rounded-md font-semibold cursor-pointer ${
+                    pdfMode === 'evaltest'
+                      ? 'bg-violet-600 text-white shadow-xs'
+                      : 'text-slate-600'
+                  }`}
+                >
+                  評価問題
                 </button>
               </div>
 
@@ -396,11 +530,80 @@ export function StudentStudyHub({
               </div>
             </div>
 
+            {/* Test Selector Bar when viewing 10-min or Eval test */}
+            {(pdfMode === 'test10min' || pdfMode === 'evaltest') &&
+              activeTestList.length > 0 && (
+                <div className="flex flex-wrap items-center justify-between gap-2 p-2.5 rounded-lg bg-indigo-50/70 border border-indigo-200 text-xs">
+                  <select
+                    value={activeTestItem?.id ?? ''}
+                    onChange={(e) => {
+                      setSelectedTestId(e.target.value);
+                      setWsPage(1);
+                    }}
+                    className="flex-1 min-w-[200px] px-2.5 py-1.5 bg-white border border-indigo-200 rounded-md font-medium text-slate-900"
+                  >
+                    {activeTestList.map((t) => (
+                      <option key={t.id} value={t.id}>
+                        {t.title}
+                      </option>
+                    ))}
+                  </select>
+                  <button
+                    type="button"
+                    onClick={() => setShowTestAnswer((v) => !v)}
+                    className={`inline-flex items-center gap-1 px-3 py-1.5 rounded-md font-semibold cursor-pointer ${
+                      showTestAnswer
+                        ? 'bg-emerald-600 text-white'
+                        : 'bg-white border border-indigo-300 text-indigo-800 hover:bg-indigo-100'
+                    }`}
+                  >
+                    <ClipboardCheck className="w-3.5 h-3.5" />
+                    <span>{showTestAnswer ? '問題に戻る' : '解答を見る'}</span>
+                  </button>
+                </div>
+              )}
+
+            {/* Quick Action Strip: "このページの類題を解く" & "前提知識から確認" */}
+            <div className="flex flex-wrap items-center justify-between gap-2 pt-1">
+              <span className="text-[11px] font-semibold text-slate-600 truncate">
+                表示中テーマ: {currentTopicForPage}
+              </span>
+              <div className="flex flex-wrap items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setPrereqTopicHint(currentTopicForPage);
+                    setShowPrereqDrawer((v) => !v);
+                  }}
+                  className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-semibold bg-amber-100 hover:bg-amber-200 text-amber-900 cursor-pointer transition-colors"
+                >
+                  <Compass className="w-3.5 h-3.5" />
+                  <span>わからない！前提から確認</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => void handlePracticeSimilarForCurrentPage()}
+                  className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-bold bg-indigo-600 hover:bg-indigo-700 text-white cursor-pointer transition-colors"
+                >
+                  <Target className="w-3.5 h-3.5" />
+                  <span>このページの類題を解く</span>
+                </button>
+              </div>
+            </div>
+
+            {showPrereqDrawer && (
+              <PrerequisiteFollowUpCard
+                chapter={activeDeck?.chapter ?? 1}
+                topicText={prereqTopicHint || currentTopicForPage}
+                onClose={() => setShowPrereqDrawer(false)}
+              />
+            )}
+
             <PdfPageViewer
               url={currentPdfUrl}
               page={wsPage}
               onPageCountLoaded={setPdfPageCount}
-              maxHeightClass="max-h-[70vh]"
+              maxHeightClass="max-h-[68vh]"
             />
           </div>
 
@@ -434,12 +637,12 @@ export function StudentStudyHub({
                     この単元の講義記録はまだありません
                   </p>
                   <p className="text-[11px] text-slate-500 leading-relaxed">
-                    先生が授業を開始・終了すると、ワークシートのページと連動した講義記録と解説ログがここに表示されます。
+                    先生が授業を開始・終了すると、ワークシート・10分間テストと連動した講義記録がここに表示されます。
                   </p>
                 </div>
               ) : (
                 <div className="space-y-3">
-                  <div className="p-3 rounded-lg bg-indigo-50/70 border border-indigo-100 space-y-1 text-xs">
+                  <div className="p-3 rounded-lg bg-indigo-50/70 border border-indigo-100 space-y-1.5 text-xs">
                     <div className="flex items-center justify-between text-[11px] text-indigo-700 font-semibold">
                       <span>{activeSession.deckTitle}</span>
                       <span>
@@ -449,6 +652,13 @@ export function StudentStudyHub({
                     <p className="text-slate-700 leading-relaxed">
                       {activeSession.summary}
                     </p>
+                    {activeSession.keyPoints.length > 0 && (
+                      <ul className="list-disc pl-4 space-y-0.5 text-[11px] text-slate-700 pt-1">
+                        {activeSession.keyPoints.map((kp, i) => (
+                          <li key={i}>{kp}</li>
+                        ))}
+                      </ul>
+                    )}
                   </div>
 
                   <div className="space-y-2.5 max-h-[54vh] overflow-y-auto pr-1">
@@ -478,18 +688,32 @@ export function StudentStudyHub({
                                 ワーク p.{seg.worksheetPage}
                               </span>
                             </div>
-                            <button
-                              type="button"
-                              onClick={() =>
-                                setCommentTargetPage(
-                                  isCommenting ? null : seg.slidePage
-                                )
-                              }
-                              className="inline-flex items-center gap-1 text-[11px] font-semibold text-rose-600 hover:text-rose-700 cursor-pointer"
-                            >
-                              <MessageSquarePlus className="w-3.5 h-3.5" />
-                              <span>ここがわからない</span>
-                            </button>
+                            <div className="flex items-center gap-2">
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  void handlePracticeSimilarForCurrentPage(
+                                    seg.topic,
+                                    seg.textbookPage
+                                  )
+                                }
+                                className="text-[11px] font-semibold text-indigo-600 hover:text-indigo-700 cursor-pointer"
+                              >
+                                類題
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  setCommentTargetPage(
+                                    isCommenting ? null : seg.slidePage
+                                  )
+                                }
+                                className="inline-flex items-center gap-1 text-[11px] font-semibold text-rose-600 hover:text-rose-700 cursor-pointer"
+                              >
+                                <MessageSquarePlus className="w-3.5 h-3.5" />
+                                <span>ここがわからない</span>
+                              </button>
+                            </div>
                           </div>
 
                           <p className="text-xs font-bold text-slate-900">
@@ -514,7 +738,6 @@ export function StudentStudyHub({
                             </details>
                           )}
 
-                          {/* Existing comments & AI hints */}
                           {segComments.length > 0 && (
                             <div className="space-y-1.5 pt-1">
                               {segComments.map((c) => (
@@ -547,7 +770,6 @@ export function StudentStudyHub({
                             </div>
                           )}
 
-                          {/* Comment Form */}
                           {isCommenting && (
                             <form
                               onSubmit={(e) => {
@@ -593,7 +815,7 @@ export function StudentStudyHub({
                                   onChange={(e) =>
                                     setCommentText(e.target.value)
                                   }
-                                  placeholder="どこでつまずいたか入力（AIヒントも即表示）..."
+                                  placeholder="どこでつまずいたか入力（前提フォロー＋AIヒント表示）..."
                                   className="flex-1 px-2.5 py-1.5 text-xs bg-white border border-slate-300 rounded-lg"
                                 />
                                 <button
@@ -616,9 +838,9 @@ export function StudentStudyHub({
           </div>
         </div>
       ) : (
-        /* Adaptive Personalized Practice View */
+        /* Adaptive Personalized Practice + Prerequisite Follow-up View */
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-5">
-          {/* Left: Personal Weak Spot Analysis & Mastery */}
+          {/* Left: Personal Weak Spot Analysis & Generator */}
           <div className="lg:col-span-4 space-y-4">
             <div className="bg-white border border-slate-200 rounded-xl p-4 space-y-3">
               <div className="flex items-center justify-between">
@@ -658,14 +880,21 @@ export function StudentStudyHub({
                 </p>
                 {weakLogs.length === 0 ? (
                   <p className="text-xs text-slate-500 leading-relaxed">
-                    授業中に「わからない！」を押すか、講義記録にコメントすると、ここに自動で苦手リストが蓄積されます。選択中の単元で今すぐ演習を始めることもできます！
+                    授業中に「わからない！」を押すか、講義記録にコメントすると苦手リストが自動で蓄積されます。
                   </p>
                 ) : (
-                  <div className="space-y-1.5 max-h-48 overflow-y-auto">
+                  <div className="space-y-1.5 max-h-44 overflow-y-auto">
                     {weakLogs.slice(0, 6).map((l) => (
-                      <div
+                      <button
                         key={l.id}
-                        className="p-2 rounded-lg bg-slate-50 border border-slate-200 text-xs flex items-center justify-between gap-2"
+                        type="button"
+                        onClick={() =>
+                          void handlePracticeSimilarForCurrentPage(
+                            l.topic,
+                            l.textbookPage
+                          )
+                        }
+                        className="w-full text-left p-2 rounded-lg bg-slate-50 hover:bg-indigo-50 border border-slate-200 text-xs flex items-center justify-between gap-2 cursor-pointer"
                       >
                         <div className="min-w-0">
                           <p className="font-semibold text-slate-800 truncate">
@@ -676,7 +905,7 @@ export function StudentStudyHub({
                           </p>
                         </div>
                         <HelpCircle className="w-3.5 h-3.5 text-rose-500 shrink-0" />
-                      </div>
+                      </button>
                     ))}
                   </div>
                 )}
@@ -733,156 +962,173 @@ export function StudentStudyHub({
             </div>
           </div>
 
-          {/* Right: Generated Adaptive Problems */}
+          {/* Right: Prerequisite Follow-Up + Generated Adaptive Problems */}
           <div className="lg:col-span-8 space-y-4">
+            <PrerequisiteFollowUpCard
+              chapter={activeDeck?.chapter ?? 1}
+              topicText={
+                prereqTopicHint || weakLogs[0]?.topic || activeDeck?.title || ''
+              }
+            />
+
             {problems.length === 0 ? (
-              <div className="bg-white border border-slate-200 rounded-xl p-10 text-center space-y-3">
-                <Brain className="w-10 h-10 text-indigo-500 mx-auto" />
+              <div className="bg-white border border-slate-200 rounded-xl p-8 text-center space-y-3">
+                <Brain className="w-9 h-9 text-indigo-500 mx-auto" />
                 <h3 className="text-base font-bold text-slate-900">
                   「自分専用の問題を3問生成する」を押してスタート！
                 </h3>
                 <p className="text-xs text-slate-600 max-w-md mx-auto leading-relaxed">
-                  つまずいたページや選択中の単元（{activeDeck?.title}）に合わせて、ヒント付きの確認問題を自動生成します。
+                  まずは上の「つまずき前提フォロー」で中学・基礎単元を確認してから、演習問題にチャレンジするのもおすすめです。
                 </p>
               </div>
             ) : (
-              problems.map((prob, index) => {
-                const chosen = selectedAnswers[prob.id];
-                const isGraded = Boolean(gradedIds[prob.id]);
-                const isCorrect = isGraded && chosen === prob.answer;
-                const hintLevel = revealedHints[prob.id] ?? 0;
-
-                return (
-                  <div
-                    key={prob.id}
-                    className="bg-white border border-slate-200 rounded-xl p-5 space-y-4"
-                  >
-                    <div className="flex flex-wrap items-center justify-between gap-2">
-                      <div className="flex items-center gap-2 text-xs">
-                        <span className="px-2 py-0.5 rounded-md bg-indigo-600 text-white font-bold">
-                          第 {index + 1} 問
-                        </span>
-                        <span className="font-bold text-slate-800">
-                          {prob.topic}
-                        </span>
-                      </div>
-                      <span className="text-[11px] px-2 py-0.5 rounded bg-slate-100 text-slate-600 font-medium">
-                        {prob.source === 'ai' ? 'AI生成' : '数学Ⅰアダプティブ'}
-                      </span>
-                    </div>
-
-                    <p className="text-sm font-semibold text-slate-900 leading-relaxed">
-                      {prob.question}
-                    </p>
-
-                    {prob.choices && (
-                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                        {prob.choices.map((choice) => {
-                          const isSelected = chosen === choice;
-                          const showCorrect =
-                            isGraded && choice === prob.answer;
-                          const showWrong =
-                            isGraded && isSelected && choice !== prob.answer;
-                          return (
-                            <button
-                              key={choice}
-                              type="button"
-                              disabled={isGraded}
-                              onClick={() =>
-                                setSelectedAnswers((prev) => ({
-                                  ...prev,
-                                  [prob.id]: choice,
-                                }))
-                              }
-                              className={`text-left px-3.5 py-2.5 rounded-xl border text-xs font-semibold transition-colors cursor-pointer ${
-                                showCorrect
-                                  ? 'bg-emerald-50 border-emerald-500 text-emerald-900'
-                                  : showWrong
-                                    ? 'bg-rose-50 border-rose-500 text-rose-900'
-                                    : isSelected
-                                      ? 'bg-indigo-50 border-indigo-500 text-indigo-900'
-                                      : 'bg-slate-50 hover:bg-slate-100 border-slate-200 text-slate-800'
-                              }`}
-                            >
-                              {choice}
-                            </button>
-                          );
-                        })}
-                      </div>
-                    )}
-
-                    {/* Hints */}
-                    {prob.hints.length > 0 && hintLevel > 0 && (
-                      <div className="space-y-1.5">
-                        {prob.hints.slice(0, hintLevel).map((h, hi) => (
-                          <div
-                            key={hi}
-                            className="p-2.5 rounded-lg bg-amber-50 border border-amber-200 text-xs text-amber-900 flex items-start gap-2"
-                          >
-                            <Lightbulb className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
-                            <span>
-                              ヒント{hi + 1}: {h}
-                            </span>
-                          </div>
-                        ))}
-                      </div>
-                    )}
-
-                    <div className="flex flex-wrap items-center justify-between gap-2 pt-1">
-                      {!isGraded && hintLevel < prob.hints.length ? (
-                        <button
-                          type="button"
-                          onClick={() =>
-                            setRevealedHints((prev) => ({
-                              ...prev,
-                              [prob.id]: hintLevel + 1,
-                            }))
-                          }
-                          className="inline-flex items-center gap-1.5 text-xs font-semibold text-amber-700 hover:text-amber-800 cursor-pointer"
-                        >
-                          <Lightbulb className="w-3.5 h-3.5" />
-                          <span>ヒントを見る ({hintLevel + 1}/{prob.hints.length})</span>
-                        </button>
-                      ) : (
-                        <span />
-                      )}
-
-                      {!isGraded ? (
-                        <button
-                          type="button"
-                          disabled={!chosen}
-                          onClick={() => void handleCheckAnswer(prob)}
-                          className="px-4 py-2 text-xs font-bold text-white bg-indigo-600 hover:bg-indigo-700 disabled:opacity-40 rounded-lg transition-colors cursor-pointer"
-                        >
-                          答え合わせをする
-                        </button>
-                      ) : (
-                        <span
-                          className={`inline-flex items-center gap-1 text-xs font-bold ${
-                            isCorrect ? 'text-emerald-600' : 'text-rose-600'
-                          }`}
-                        >
-                          <CheckCircle2 className="w-4 h-4" />
-                          <span>
-                            {isCorrect
-                              ? '正解！すばらしい！'
-                              : `惜しい！正解は「${prob.answer}」`}
-                          </span>
-                        </span>
-                      )}
-                    </div>
-
-                    {isGraded && (
-                      <div className="p-3.5 rounded-xl bg-slate-50 border border-slate-200 text-xs text-slate-800 leading-relaxed">
-                        <span className="block font-bold text-slate-900 mb-1">
-                          解説
-                        </span>
-                        {prob.explanation}
-                      </div>
-                    )}
+              <div className="space-y-4">
+                {practiceHeader && (
+                  <div className="text-xs font-bold text-indigo-900 bg-indigo-50 border border-indigo-200 rounded-lg px-3.5 py-2">
+                    {practiceHeader}
                   </div>
-                );
-              })
+                )}
+                {problems.map((prob, index) => {
+                  const chosen = selectedAnswers[prob.id];
+                  const isGraded = Boolean(gradedIds[prob.id]);
+                  const isCorrect = isGraded && chosen === prob.answer;
+                  const hintLevel = revealedHints[prob.id] ?? 0;
+
+                  return (
+                    <div
+                      key={prob.id}
+                      className="bg-white border border-slate-200 rounded-xl p-5 space-y-4"
+                    >
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <div className="flex items-center gap-2 text-xs">
+                          <span className="px-2 py-0.5 rounded-md bg-indigo-600 text-white font-bold">
+                            第 {index + 1} 問
+                          </span>
+                          <span className="font-bold text-slate-800">
+                            {prob.topic}
+                          </span>
+                        </div>
+                        <span className="text-[11px] px-2 py-0.5 rounded bg-slate-100 text-slate-600 font-medium">
+                          {prob.source === 'ai'
+                            ? 'Gemini AI生成'
+                            : '数学Ⅰアダプティブ'}
+                        </span>
+                      </div>
+
+                      <p className="text-sm font-semibold text-slate-900 leading-relaxed">
+                        {prob.question}
+                      </p>
+
+                      {prob.choices && (
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                          {prob.choices.map((choice) => {
+                            const isSelected = chosen === choice;
+                            const showCorrect =
+                              isGraded && choice === prob.answer;
+                            const showWrong =
+                              isGraded && isSelected && choice !== prob.answer;
+                            return (
+                              <button
+                                key={choice}
+                                type="button"
+                                disabled={isGraded}
+                                onClick={() =>
+                                  setSelectedAnswers((prev) => ({
+                                    ...prev,
+                                    [prob.id]: choice,
+                                  }))
+                                }
+                                className={`text-left px-3.5 py-2.5 rounded-xl border text-xs font-semibold transition-colors cursor-pointer ${
+                                  showCorrect
+                                    ? 'bg-emerald-50 border-emerald-500 text-emerald-900'
+                                    : showWrong
+                                      ? 'bg-rose-50 border-rose-500 text-rose-900'
+                                      : isSelected
+                                        ? 'bg-indigo-50 border-indigo-500 text-indigo-900'
+                                        : 'bg-slate-50 hover:bg-slate-100 border-slate-200 text-slate-800'
+                                }`}
+                              >
+                                {choice}
+                              </button>
+                            );
+                          })}
+                        </div>
+                      )}
+
+                      {prob.hints.length > 0 && hintLevel > 0 && (
+                        <div className="space-y-1.5">
+                          {prob.hints.slice(0, hintLevel).map((h, hi) => (
+                            <div
+                              key={hi}
+                              className="p-2.5 rounded-lg bg-amber-50 border border-amber-200 text-xs text-amber-900 flex items-start gap-2"
+                            >
+                              <Lightbulb className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
+                              <span>
+                                ヒント{hi + 1}: {h}
+                              </span>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+
+                      <div className="flex flex-wrap items-center justify-between gap-2 pt-1">
+                        {!isGraded && hintLevel < prob.hints.length ? (
+                          <button
+                            type="button"
+                            onClick={() =>
+                              setRevealedHints((prev) => ({
+                                ...prev,
+                                [prob.id]: hintLevel + 1,
+                              }))
+                            }
+                            className="inline-flex items-center gap-1.5 text-xs font-semibold text-amber-700 hover:text-amber-800 cursor-pointer"
+                          >
+                            <Lightbulb className="w-3.5 h-3.5" />
+                            <span>
+                              ヒントを見る ({hintLevel + 1}/{prob.hints.length})
+                            </span>
+                          </button>
+                        ) : (
+                          <span />
+                        )}
+
+                        {!isGraded ? (
+                          <button
+                            type="button"
+                            disabled={!chosen}
+                            onClick={() => void handleCheckAnswer(prob)}
+                            className="px-4 py-2 text-xs font-bold text-white bg-indigo-600 hover:bg-indigo-700 disabled:opacity-40 rounded-lg transition-colors cursor-pointer"
+                          >
+                            答え合わせをする
+                          </button>
+                        ) : (
+                          <span
+                            className={`inline-flex items-center gap-1 text-xs font-bold ${
+                              isCorrect ? 'text-emerald-600' : 'text-rose-600'
+                            }`}
+                          >
+                            <CheckCircle2 className="w-4 h-4" />
+                            <span>
+                              {isCorrect
+                                ? '正解！すばらしい！'
+                                : `惜しい！正解は「${prob.answer}」`}
+                            </span>
+                          </span>
+                        )}
+                      </div>
+
+                      {isGraded && (
+                        <div className="p-3.5 rounded-xl bg-slate-50 border border-slate-200 text-xs text-slate-800 leading-relaxed">
+                          <span className="block font-bold text-slate-900 mb-1">
+                            解説
+                          </span>
+                          {prob.explanation}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
             )}
           </div>
         </div>

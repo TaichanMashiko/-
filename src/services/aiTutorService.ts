@@ -1,10 +1,12 @@
 import { GoogleGenAI } from '@google/genai';
+import { findPrerequisitesForTopic } from '../data/mathPrerequisites';
 import type {
   AdaptiveProblem,
   DeckInfo,
   LectureSegment,
   StudentLearningLog,
 } from '../types';
+import { getRecommendedTestsForTopic } from './materialsService';
 
 const GEMINI_KEY_LS = 'classpulse_gemini_api_key';
 
@@ -63,6 +65,15 @@ export async function generateLectureNotes(
   }
 
   const ai = getGenAIClient();
+  const recTests = getRecommendedTestsForTopic(
+    deck.chapter,
+    segments.map((s) => s.topic).join(' ')
+  );
+  const prereqChain = findPrerequisitesForTopic(
+    deck.chapter,
+    segments.map((s) => s.topic).join(' ')
+  );
+
   if (ai) {
     try {
       const compactSegments = segments.map((seg) => ({
@@ -75,19 +86,26 @@ export async function generateLectureNotes(
         transcript: seg.transcript.slice(0, 600),
       }));
 
-      const prompt = `あなたは高校数学Ⅰの優秀な授業書記アシスタントです。
-以下の授業録音文字起こしとスライド進行データから、生徒が後でワークシートを見ながら復習しやすい日本語の「講義記録」をJSON形式で作成してください。
+      const prompt = `あなたは高校数学Ⅰのベテラン教員兼書記アシスタントです。
+以下の授業録音文字起こし・スライド進行・つまずきデータから、生徒がワークシートや10分間テストを見ながら復習しやすい、構造化された日本語の「講義記録」をJSON形式で作成してください。
 
 単元: ${deck.title}
+関連する前提知識: ${prereqChain.prerequisites.map((p) => `${p.title}（${p.grade}）`).join(' / ')}
+関連する確認テスト: ${recTests.slice(0, 3).map((t) => t.title).join(' / ')}
 区間データ:
 ${JSON.stringify(compactSegments, null, 2)}
 
 以下のJSON形式のみで返答してください（マークダウン記法は不要）:
 {
-  "summary": "今回の授業全体のわかりやすい要約（2〜3文）",
-  "keyPoints": ["重要ポイント1", "重要ポイント2", "重要ポイント3"],
+  "summary": "【今回のねらい】と【授業全体の流れ・重要ポイント】を生徒向けにわかりやすく3〜4文でまとめた要約",
+  "keyPoints": [
+    "【重要公式・用語】...",
+    "【解法のコツ】...",
+    "【つまずき注意＆前提知識】...",
+    "【おすすめ復習】対応ワークシート・10分間テストの活用法"
+  ],
   "segmentNotes": [
-    { "slidePage": 数値, "aiNote": "このスライドでの先生の解説要点と復習アドバイス（1〜2文）" }
+    { "slidePage": 数値, "aiNote": "このスライドでの解説要点・式変形のポイント・つまずきやすい箇所のフォロー（2文程度）" }
   ]
 }`;
 
@@ -128,7 +146,7 @@ ${JSON.stringify(compactSegments, null, 2)}
     }
   }
 
-  // Deterministic high-quality fallback
+  // Deterministic high-quality structured fallback
   const startSlide = segments[0].slidePage;
   const endSlide = segments[segments.length - 1].slidePage;
   const tbPages = segments
@@ -142,12 +160,13 @@ ${JSON.stringify(compactSegments, null, 2)}
   const hardest = [...segments].sort(
     (a, b) => b.confusionCount - a.confusionCount
   )[0];
+  const mainPrereq = prereqChain.prerequisites[0];
 
   const summary =
-    `${deck.title} のスライド p.${startSlide}〜p.${endSlide}${tbText}を扱いました。` +
+    `【今回の学習範囲】${deck.title} のスライド p.${startSlide}〜p.${endSlide}${tbText}を学習しました。` +
     (totalConfused > 0 && hardest
-      ? ` 特にスライド p.${hardest.slidePage}「${hardest.topic}」でつまずきが多かったため、対応ワークシート p.${hardest.worksheetPage} の復習がおすすめです。`
-      : ` 各スライドに対応するワークシートと解答PDFを見比べながら復習しましょう。`);
+      ? ` 特にスライド p.${hardest.slidePage}「${hardest.topic}」でつまずきが多かったため、ワークシート p.${hardest.worksheetPage} と前提知識「${mainPrereq?.title ?? '基本公式'}」を確認して復習しましょう。`
+      : ` ワークシート・解答PDFや対応する「${recTests[0]?.title ?? '10分間テスト'}」を使って定着させましょう。`);
 
   return {
     summary,
@@ -208,17 +227,26 @@ function buildFallbackSegmentNote(seg: LectureSegment): string {
  */
 export async function generateCommentHint(params: {
   deckTitle: string;
+  chapter?: number;
   topic: string;
   textbookPage: number | null;
   worksheetPage: number;
   questionText: string;
   transcript: string;
 }): Promise<string> {
+  const prereq = findPrerequisitesForTopic(params.chapter ?? 1, params.topic);
+  const prereqSummary = prereq.prerequisites
+    .slice(0, 2)
+    .map((p) => `「${p.title}（${p.grade}）」(${p.formula})`)
+    .join('、');
+
   const ai = getGenAIClient();
   if (ai) {
     try {
-      const prompt = `高校数学Ⅰの優しい先生として、生徒の疑問に3行以内でわかりやすくヒントを出してください。
+      const prompt = `高校数学Ⅰの優しい先生として、生徒の疑問に4行以内でわかりやすくヒントを出してください。
+必ず「つまずきの原因になりやすい前提知識（中学数学や前の単元）」にも1文で触れてフォローしてください。
 単元: ${params.deckTitle} / テーマ: ${params.topic}
+関連する前提知識: ${prereqSummary}
 教科書: ${params.textbookPage ? `p.${params.textbookPage}` : '該当ページ'} / ワークシート: p.${params.worksheetPage}
 先生の解説ログ: ${params.transcript.slice(0, 300) || 'なし'}
 生徒の質問: ${params.questionText}`;
@@ -232,7 +260,90 @@ export async function generateCommentHint(params: {
       // fallback below
     }
   }
-  return `💡 ヒント（${params.topic}）: まずはワークシート p.${params.worksheetPage} の解答PDFで「最初の1行目の式変形」だけを確認してみましょう。符号のミスや公式の当てはめ方が分かると一気に解けるようになります！`;
+  return `💡 ヒント（${params.topic}）: まずは土台となる前提知識 ${prereqSummary} を確認してから、ワークシート p.${params.worksheetPage} の解答PDFで「最初の1行目の式変形」を見比べてみましょう！`;
+}
+
+/**
+ * Generate 3 similar practice problems specifically for a selected page/topic ("このページの類題を解く").
+ */
+export async function generateSimilarProblemsForPage(params: {
+  chapter: number;
+  deckId: string;
+  deckTitle: string;
+  topic: string;
+  textbookPage: number | null;
+  worksheetPage: number;
+  difficulty: 'basic' | 'standard' | 'challenge';
+}): Promise<AdaptiveProblem[]> {
+  const ai = getGenAIClient();
+  if (ai) {
+    try {
+      const prompt = `あなたは高校数学Ⅰの先生です。生徒が「このページの類題を解きたい！」と言っています。
+以下のページ内容にぴったり合った4択の類題を3問作成してください。
+単元: ${params.deckTitle}
+テーマ: ${params.topic}
+教科書: ${params.textbookPage ? `p.${params.textbookPage}` : '該当箇所'} / ワークシート: p.${params.worksheetPage}
+難易度: ${params.difficulty}
+
+以下のJSON配列のみで返答してください:
+[
+  {
+    "topic": "テーマ名",
+    "question": "問題文",
+    "choices": ["選択肢1", "選択肢2", "選択肢3", "選択肢4"],
+    "answer": "正解の選択肢（choicesのいずれかと完全一致）",
+    "hints": ["前提知識を思い出すヒント1", "解き方のヒント2"],
+    "explanation": "わかりやすい途中式と解説"
+  }
+]`;
+      const res = await ai.models.generateContent({
+        model: 'gemini-2.5-flash',
+        contents: prompt,
+      });
+      const raw = (res.text ?? '').trim();
+      const arrMatch = raw.match(/\[[\s\S]*\]/);
+      if (arrMatch) {
+        const parsed = JSON.parse(arrMatch[0]) as Array<{
+          topic: string;
+          question: string;
+          choices: string[];
+          answer: string;
+          hints: string[];
+          explanation: string;
+        }>;
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          return parsed.slice(0, 3).map((p, i) => ({
+            id: `sim_prob_${Date.now()}_${i}`,
+            chapter: params.chapter,
+            deckId: params.deckId,
+            topic: p.topic || params.topic,
+            difficulty: params.difficulty,
+            textbookPage: params.textbookPage,
+            worksheetPage: params.worksheetPage,
+            question: p.question,
+            choices: p.choices,
+            answer: p.answer,
+            hints: p.hints ?? [],
+            explanation: p.explanation ?? '',
+            source: 'ai' as const,
+          }));
+        }
+      }
+    } catch {
+      // fallback below
+    }
+  }
+  return [0, 1, 2].map((i) => ({
+    ...generateProceduralProblem(
+      params.chapter,
+      params.deckId,
+      params.difficulty,
+      params.topic,
+      i
+    ),
+    textbookPage: params.textbookPage,
+    worksheetPage: params.worksheetPage,
+  }));
 }
 
 // --- Procedural Adaptive Math I Problem Generator (always works offline + AI upgrade) ---
