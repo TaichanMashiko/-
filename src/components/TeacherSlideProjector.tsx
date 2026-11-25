@@ -262,12 +262,12 @@ export function TeacherSlideProjector({
     [activeDeck, activeSession, totalPages]
   );
 
-  // Keyboard navigation in projector mode
+  // Keyboard navigation in projector mode (ArrowRight / Space = next animation step, ArrowLeft = previous)
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
       const tag = (e.target as HTMLElement | null)?.tagName;
       if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
-      if (e.key === 'ArrowRight' || e.key === 'PageDown') {
+      if (e.key === 'ArrowRight' || e.key === 'PageDown' || e.key === ' ') {
         e.preventDefault();
         goToPage(currentPageRef.current + 1);
       } else if (e.key === 'ArrowLeft' || e.key === 'PageUp') {
@@ -673,7 +673,18 @@ export function TeacherSlideProjector({
         <div className="flex flex-wrap items-center justify-between gap-2 pt-2 border-t border-slate-100 text-xs">
           <div className="flex flex-wrap items-center gap-2">
             <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md bg-slate-900 text-white font-mono-tabular font-semibold">
-              デジタル板書 p.{currentPage} / {totalPages}
+              {currentSlideMeta?.sourceSlide ? (
+                <>
+                  板書 スライド {currentSlideMeta.sourceSlide}
+                  {currentSlideMeta.stepTotal && currentSlideMeta.stepTotal > 0
+                    ? ` (段階 ${currentSlideMeta.stepIndex ?? 0}/${currentSlideMeta.stepTotal})`
+                    : ''}
+                </>
+              ) : (
+                <>
+                  デジタル板書 p.{currentPage} / {totalPages}
+                </>
+              )}
             </span>
             {currentSlideMeta?.textbookPage && (
               <a

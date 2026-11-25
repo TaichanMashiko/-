@@ -82,6 +82,9 @@ export interface MuteData {
 
 export interface SlideMetadata {
   page: number;
+  sourceSlide?: number;
+  stepIndex?: number;
+  stepTotal?: number;
   textbookPage: number | null;
   worksheetPage: number;
   topic: string;
