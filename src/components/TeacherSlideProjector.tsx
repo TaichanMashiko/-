@@ -817,11 +817,11 @@ export function TeacherSlideProjector({
         ref={projectorRef}
         className={`${
           isFullscreen
-            ? 'fixed inset-0 z-50 h-screen w-screen overflow-hidden bg-slate-950 p-2.5 flex flex-col gap-2'
+            ? 'fixed inset-0 z-50 h-screen w-screen overflow-hidden bg-black flex flex-col'
             : 'relative'
         }`}
       >
-        {/* Live Student Comments & Confused Bar inside Fullscreen Projector */}
+        {/* Ultra-slim Live Student Comments & Confused Bar inside Fullscreen Projector */}
         {isFullscreen && (
           <div className="shrink-0">
             <TeacherTickerBar
@@ -833,6 +833,7 @@ export function TeacherSlideProjector({
               isResetting={isResetting}
               onResetAll={onResetAll}
               onResolveMessage={onResolveMessage}
+              compact
             />
           </div>
         )}
@@ -846,75 +847,141 @@ export function TeacherSlideProjector({
           maxHeightClass="max-h-[68vh]"
         />
 
-        {/* Slide Navigation Bar */}
-        <div
-          className={`${isFullscreen ? 'shrink-0' : 'mt-2'} flex flex-wrap items-center justify-between gap-3 px-4 py-2 rounded-xl border ${
-            isFullscreen
-              ? 'bg-slate-900 border-slate-800 text-slate-100'
-              : 'bg-white border-slate-200 text-slate-900'
-          }`}
-        >
-          <div className="flex items-center gap-2">
-            <button
-              type="button"
-              disabled={currentPage <= 1}
-              onClick={() => goToPage(currentPage - 1)}
-              className="inline-flex items-center gap-1 px-3 py-1.5 text-xs font-semibold rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-900 disabled:opacity-40 cursor-pointer"
-            >
-              <ChevronLeft className="w-4 h-4" />
-              <span>前へ</span>
-            </button>
+        {/* Slide Navigation Bar (Auto-hides at bottom edge in fullscreen; always visible in normal mode) */}
+        {isFullscreen ? (
+          <div className="fixed bottom-0 inset-x-0 z-50 pt-8 pb-2.5 px-4 flex items-end justify-center opacity-0 hover:opacity-100 focus-within:opacity-100 transition-opacity duration-200">
+            <div className="w-full max-w-5xl flex flex-wrap items-center justify-between gap-3 px-4 py-2 rounded-xl bg-slate-900/95 backdrop-blur-md border border-slate-700/80 text-slate-100 shadow-2xl">
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  disabled={currentPage <= 1}
+                  onClick={() => goToPage(currentPage - 1)}
+                  className="inline-flex items-center gap-1 px-3 py-1.5 text-xs font-semibold rounded-lg bg-slate-800 hover:bg-slate-700 text-white disabled:opacity-40 cursor-pointer"
+                >
+                  <ChevronLeft className="w-4 h-4" />
+                  <span>前へ</span>
+                </button>
 
-            <div className="flex items-center gap-1.5 text-xs">
-              <input
-                type="number"
-                min={1}
-                max={totalPages}
-                value={currentPage}
-                onChange={(e) => {
-                  const v = parseInt(e.target.value, 10);
-                  if (!Number.isNaN(v)) goToPage(v);
-                }}
-                className="w-16 px-2 py-1 text-center font-mono-tabular font-bold bg-slate-50 border border-slate-300 rounded-md text-slate-900"
-              />
-              <span className="text-slate-500 font-mono-tabular">
-                / {totalPages}
-              </span>
+                <div className="flex items-center gap-1.5 text-xs">
+                  <input
+                    type="number"
+                    min={1}
+                    max={totalPages}
+                    value={currentPage}
+                    onChange={(e) => {
+                      const v = parseInt(e.target.value, 10);
+                      if (!Number.isNaN(v)) goToPage(v);
+                    }}
+                    className="w-16 px-2 py-1 text-center font-mono-tabular font-bold bg-slate-800 border border-slate-600 rounded-md text-white"
+                  />
+                  <span className="text-slate-400 font-mono-tabular">
+                    / {totalPages}
+                  </span>
+                </div>
+
+                <button
+                  type="button"
+                  disabled={currentPage >= totalPages}
+                  onClick={() => goToPage(currentPage + 1)}
+                  className="inline-flex items-center gap-1 px-3 py-1.5 text-xs font-semibold rounded-lg bg-blue-600 hover:bg-blue-500 text-white disabled:opacity-40 cursor-pointer"
+                >
+                  <span>次へ</span>
+                  <ChevronRight className="w-4 h-4" />
+                </button>
+              </div>
+
+              {/* Start / End Lecture Recording Button right inside Fullscreen */}
+              <div className="flex items-center gap-2">
+                {!activeSession ? (
+                  <button
+                    type="button"
+                    onClick={() => void handleStartLecture()}
+                    className="inline-flex items-center gap-1.5 px-3.5 py-1.5 text-xs font-bold text-white bg-emerald-600 hover:bg-emerald-500 rounded-lg transition-colors cursor-pointer"
+                  >
+                    <Mic className="w-3.5 h-3.5" />
+                    <span>授業開始（録音・p.{currentPage}〜）</span>
+                  </button>
+                ) : (
+                  <button
+                    type="button"
+                    disabled={isFinalizing}
+                    onClick={() => void handleEndLecture()}
+                    className="inline-flex items-center gap-1.5 px-3.5 py-1.5 text-xs font-bold text-white bg-rose-600 hover:bg-rose-500 disabled:opacity-60 rounded-lg transition-colors cursor-pointer"
+                  >
+                    <Square className="w-3 h-3 fill-current" />
+                    <span>
+                      {isFinalizing
+                        ? '記録作成中...'
+                        : `授業終了 (${formatDuration(elapsedSec)})`}
+                    </span>
+                  </button>
+                )}
+
+                <button
+                  type="button"
+                  onClick={toggleFullscreen}
+                  className="px-3 py-1.5 text-xs rounded-lg bg-slate-800 hover:bg-slate-700 text-white font-semibold cursor-pointer"
+                >
+                  全画面を閉じる
+                </button>
+              </div>
             </div>
-
-            <button
-              type="button"
-              disabled={currentPage >= totalPages}
-              onClick={() => goToPage(currentPage + 1)}
-              className="inline-flex items-center gap-1 px-3 py-1.5 text-xs font-semibold rounded-lg bg-blue-600 hover:bg-blue-700 text-white disabled:opacity-40 cursor-pointer"
-            >
-              <span>次へ</span>
-              <ChevronRight className="w-4 h-4" />
-            </button>
           </div>
-
-          <div className="flex items-center gap-3 text-xs">
-            <span
-              className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md font-semibold ${
-                confusedCount > 0
-                  ? 'bg-rose-600 text-white'
-                  : 'bg-slate-100 text-slate-600'
-              }`}
-            >
-              <AlertTriangle className="w-3.5 h-3.5" />
-              <span>現在の「？」: {confusedCount}人</span>
-            </span>
-            {isFullscreen && (
+        ) : (
+          <div className="mt-2 flex flex-wrap items-center justify-between gap-3 px-4 py-2 rounded-xl border bg-white border-slate-200 text-slate-900">
+            <div className="flex items-center gap-2">
               <button
                 type="button"
-                onClick={toggleFullscreen}
-                className="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-white font-semibold cursor-pointer"
+                disabled={currentPage <= 1}
+                onClick={() => goToPage(currentPage - 1)}
+                className="inline-flex items-center gap-1 px-3 py-1.5 text-xs font-semibold rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-900 disabled:opacity-40 cursor-pointer"
               >
-                全画面を閉じる
+                <ChevronLeft className="w-4 h-4" />
+                <span>前へ</span>
               </button>
-            )}
+
+              <div className="flex items-center gap-1.5 text-xs">
+                <input
+                  type="number"
+                  min={1}
+                  max={totalPages}
+                  value={currentPage}
+                  onChange={(e) => {
+                    const v = parseInt(e.target.value, 10);
+                    if (!Number.isNaN(v)) goToPage(v);
+                  }}
+                  className="w-16 px-2 py-1 text-center font-mono-tabular font-bold bg-slate-50 border border-slate-300 rounded-md text-slate-900"
+                />
+                <span className="text-slate-500 font-mono-tabular">
+                  / {totalPages}
+                </span>
+              </div>
+
+              <button
+                type="button"
+                disabled={currentPage >= totalPages}
+                onClick={() => goToPage(currentPage + 1)}
+                className="inline-flex items-center gap-1 px-3 py-1.5 text-xs font-semibold rounded-lg bg-blue-600 hover:bg-blue-700 text-white disabled:opacity-40 cursor-pointer"
+              >
+                <span>次へ</span>
+                <ChevronRight className="w-4 h-4" />
+              </button>
+            </div>
+
+            <div className="flex items-center gap-3 text-xs">
+              <span
+                className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md font-semibold ${
+                  confusedCount > 0
+                    ? 'bg-rose-600 text-white'
+                    : 'bg-slate-100 text-slate-600'
+                }`}
+              >
+                <AlertTriangle className="w-3.5 h-3.5" />
+                <span>現在の「？」: {confusedCount}人</span>
+              </span>
+            </div>
           </div>
-        </div>
+        )}
       </div>
     </div>
   );

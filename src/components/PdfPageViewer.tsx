@@ -157,13 +157,13 @@ export function PdfPageViewer({
       } ${className}`}
     >
       <div
-        className={`relative flex items-center justify-center rounded-xl border ${
+        className={`relative flex items-center justify-center ${
           fitToContainer
-            ? 'flex-1 min-h-0 w-full h-full overflow-hidden p-1'
-            : `overflow-auto ${maxHeightClass}`
+            ? 'flex-1 min-h-0 w-full h-full overflow-hidden'
+            : `rounded-xl border overflow-auto ${maxHeightClass}`
         } ${
           darkBackdrop
-            ? 'bg-slate-950 border-slate-800'
+            ? 'bg-black border-slate-800'
             : 'bg-slate-100 border-slate-200'
         }`}
       >
@@ -171,7 +171,7 @@ export function PdfPageViewer({
           ref={canvasRef}
           className={
             fitToContainer
-              ? 'block max-w-full max-h-full w-auto h-auto object-contain bg-white shadow-lg'
+              ? 'block max-w-full max-h-full w-auto h-auto object-contain bg-white'
               : 'block w-full max-w-5xl h-auto bg-white'
           }
         />
